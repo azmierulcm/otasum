@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brand-coral: #FF5A5F;
+  --brand-navy: #1B2B5E;
+  --brand-teal: #00A699;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: #F7F7F7;
+  color: #484848;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Safe area for iOS notch / home bar */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Custom scrollbar for tabs */
+.tabs-scroll::-webkit-scrollbar {
+  height: 0;
+}
+
+/* Markdown content base styles */
+.markdown-body {
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+
+.markdown-body > *:first-child {
+  margin-top: 0 !important;
+}
+
+/* Plane track line behind flying animation */
+.plane-track {
+  background: linear-gradient(to right, transparent, rgba(27,43,94,0.15), transparent);
+}
+
+@layer utilities {
+  .animation-delay-200 { animation-delay: 200ms; }
+  .animation-delay-400 { animation-delay: 400ms; }
+  .animation-delay-600 { animation-delay: 600ms; }
+}
