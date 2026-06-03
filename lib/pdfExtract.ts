@@ -2,9 +2,10 @@
 
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Worker is copied to public/ by the prebuild script and served as a plain
-// static file — no webpack bundling, no import.meta, works on all networks.
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+// jsdelivr is faster and more reliable on mobile than unpkg.
+// Version is read from the installed package so it always matches.
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
 export async function extractPdfText(
   file: File,
