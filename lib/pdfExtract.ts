@@ -1,16 +1,16 @@
 'use client';
 
-import * as pdfjsLib from 'pdfjs-dist';
-
-// jsdelivr is faster and more reliable on mobile than unpkg.
-// Version is read from the installed package so it always matches.
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
-
 export async function extractPdfText(
   file: File,
   onProgress?: (page: number, total: number) => void,
 ): Promise<string> {
+  // Dynamic import — only runs in the browser, never during SSR/prerendering.
+  const pdfjsLib = await import('pdfjs-dist');
+
+  // jsdelivr is faster and more reliable on mobile than unpkg.
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+
   const arrayBuffer = await file.arrayBuffer();
   const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
