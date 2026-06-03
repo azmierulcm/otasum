@@ -26,15 +26,26 @@ export default function Home() {
     setError('');
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-
+      // Raw binary POST — simpler than FormData, more reliable on mobile
       const response = await fetch('/api/analyze', {
         method: 'POST',
-        body: formData,
+        headers: {
+          'Content-Type': 'application/pdf',
+          'X-File-Name': encodeURIComponent(file.name),
+        },
+        body: file,
       });
 
-      if (!response.body) throw new Error(`Server error (${response.status})`);
+      // Platform-level errors (413, 500 HTML pages) arrive before the stream starts
+      if (!response.ok || !response.body) {
+        const text = await response.text();
+        const isTooBig = response.status === 413 || text.toLowerCase().includes('entity too large');
+        throw new Error(
+          isTooBig
+            ? 'PDF is too large. Please compress the file to under 4 MB and retry.'
+            : text.replace(/<[^>]+>/g, '').trim().slice(0, 200) || `Server error (${response.status})`
+        );
+      }
 
       const reader  = response.body.getReader();
       const decoder = new TextDecoder();
@@ -46,11 +57,17 @@ export default function Home() {
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop()!; // hold incomplete last line
+        buffer = lines.pop()!;
 
         for (const line of lines) {
           if (!line.trim()) continue;
-          const event = JSON.parse(line) as StreamEvent;
+
+          let event: StreamEvent;
+          try {
+            event = JSON.parse(line) as StreamEvent;
+          } catch {
+            throw new Error(`Unexpected server response — please try again. (${line.slice(0, 80)})`);
+          }
 
           if (event.type === 'error') throw new Error(event.message);
 
@@ -59,7 +76,6 @@ export default function Home() {
               const next = prev.filter(m => m.key !== event.data.key);
               return [...next, event.data].sort((a, b) => a.number - b.number);
             });
-            // Switch to results as soon as first module lands
             setState('results');
           }
         }

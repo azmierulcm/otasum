@@ -54,24 +54,24 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        // ── 1. Accept binary PDF via FormData ────────────────────────────────
-        const formData = await request.formData();
-        const file = formData.get('file');
+        // ── 1. Accept raw binary PDF ─────────────────────────────────────────
+        const fileName   = decodeURIComponent(request.headers.get('x-file-name') ?? 'document.pdf');
+        const arrayBuffer = await request.arrayBuffer();
 
-        if (!file || !(file instanceof File)) {
-          send({ type: 'error', message: 'No PDF file received.' });
+        if (!arrayBuffer.byteLength) {
+          send({ type: 'error', message: 'No PDF received.' });
           controller.close();
           return;
         }
 
-        if (file.size > 20 * 1024 * 1024) {
+        if (arrayBuffer.byteLength > 20 * 1024 * 1024) {
           send({ type: 'error', message: 'PDF exceeds 20 MB limit.' });
           controller.close();
           return;
         }
 
         // ── 2. Extract text server-side ──────────────────────────────────────
-        const buffer  = Buffer.from(await file.arrayBuffer());
+        const buffer  = Buffer.from(arrayBuffer);
         const pdfData = await pdf(buffer);
         const rawText = pdfData.text.trim();
 
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
           return;
         }
 
-        console.log(`[/api/analyze] ${file.name} — ${rawText.length} chars`);
+        console.log(`[/api/analyze] ${fileName} — ${rawText.length} chars`);
 
         // ── 3. Local parsers — stream immediately (< 1 s) ───────────────────
         const ctx   = extractFlightContext(rawText);
