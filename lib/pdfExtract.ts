@@ -2,12 +2,9 @@
 
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Webpack 5 bundles the worker into the build output and serves it from the
-// same origin — no CDN dependency, works on all networks including mobile.
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
+// Worker is copied to public/ by the prebuild script and served as a plain
+// static file — no webpack bundling, no import.meta, works on all networks.
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 export async function extractPdfText(
   file: File,
