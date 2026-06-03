@@ -119,6 +119,63 @@ function extractRouteString(raw: string): string {
     : 'N/A';
 }
 
+function sectionBetween(text: string, startRe: RegExp, endRes: RegExp[]): string {
+  const start = text.search(startRe);
+  if (start < 0) return '';
+
+  const tail = text.slice(start);
+  const end = endRes
+    .map((re) => {
+      const idx = tail.slice(1).search(re);
+      return idx < 0 ? null : idx + 1;
+    })
+    .filter((idx): idx is number => idx !== null)
+    .sort((a, b) => a - b)[0];
+
+  return (end ? tail.slice(0, end) : tail).trim();
+}
+
+function routeFirCodes(raw: string): Set<string> {
+  const wxStart = raw.search(/(?:^|\n)\s*Weather\s*(?:\n|$)/i);
+  const preWeather = raw.slice(0, wxStart > 0 ? wxStart : Math.min(raw.length, 90000));
+  const codes = new Set<string>();
+  const re = /^([A-Z0-9]{4})\s{2,}[A-Z][A-Z\s()/.-]*\bFIR\b/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(preWeather)) !== null) codes.add(m[1]);
+  return codes;
+}
+
+function notamSectionsForCodes(block: string, codes: Set<string>, maxChars: number, maxSectionChars: number): string {
+  if (codes.size === 0) return '';
+
+  const lines = block.split('\n');
+  const sections: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const heading = lines[i].trim().match(/^([A-Z0-9]{4})\s{2,}.+/);
+    if (!heading || !codes.has(heading[1])) continue;
+
+    let end = lines.length;
+    for (let j = i + 1; j < lines.length; j++) {
+      const nextHeading = lines[j].trim().match(/^([A-Z0-9]{3,5})\s{2,}.+/);
+      const nextDashed = lines[j + 1]?.trim().startsWith('---');
+      if (nextHeading && nextDashed) {
+        end = j;
+        break;
+      }
+    }
+
+    let section = lines.slice(i, end).join('\n').trim();
+    if (section.length > maxSectionChars) {
+      section = section.slice(0, maxSectionChars) + '\n[Section truncated for AI input size]';
+    }
+    sections.push(section);
+  }
+
+  let joined = sections.filter(Boolean).join('\n\n');
+  if (joined.length > maxChars) joined = joined.slice(0, maxChars) + '\n\n[ENROUTE NOTAM section truncated for AI input size]';
+  return joined;
+}
+
 /** Convert Lido date "02 JUN 2026" + time "1530" → ISO "2026-06-02T15:30Z" */
 function toIso(dateStr: string, timeHHMM: string): string {
   const MONTHS: Record<string, string> = {
@@ -226,8 +283,8 @@ export function extractFlightContext(raw: string): FlightContext {
   const alts = Array.from(altSet).slice(0, 6);
 
   // ── EDTO en-route alternates ──────────────────────────────────────────────
-  const edtoBlock = raw.match(/ENRTE\s+ALTNS\s*\([^)]+\)([\s\S]+?)(?=\n-{10,}|\nEDTO\s+INFO)/i)?.[1] ?? '';
-  const edtoRe    = /^([A-Z]{4})\s+[\d:]+/gm;
+  const edtoBlock = raw.match(/ENRTE\s+ALTNS\s*\([^)]+\)([\s\S]+?)(?=\n\s*(?:Page\s+\d+|Weather|LIDO\s+TAKE|WPT\s+|TERRAIN|[-]{5,}))/i)?.[1] ?? '';
+  const edtoRe    = /^([A-Z]{4})\s+\d{2}:\d{2}\s+\d{2}:\d{2}\s+WX\s+MIN:/gm;
   const edtoSet   = new Set<string>();
   let edtoM: RegExpExecArray | null;
   while ((edtoM = edtoRe.exec(edtoBlock)) !== null) edtoSet.add(edtoM[1]);
@@ -277,6 +334,7 @@ export function extractWxSection(raw: string): string {
   const crewEnd  = raw.slice(wxStart > -1 ? wxStart : 0).search(/(?:^|\n)\s*Crew Information\s*(?:\n|$)/i);
   if (wxStart < 0) return '[Weather section not found in document]';
   const end = crewEnd > 0 ? wxStart + crewEnd : wxStart + 35000;
+  const wxBlock = raw.slice(wxStart, end);
 
   // Prepend upper winds table (before weather section) for segmented analysis
   const windIdx   = raw.search(/WIND INFORMATION/i);
@@ -284,7 +342,17 @@ export function extractWxSection(raw: string): string {
     ? '\n=== UPPER WINDS TABLE ===\n' + raw.slice(windIdx, wxStart).slice(0, 18000)
     : '';
 
-  return windBlock + '\n=== WEATHER PACKAGE ===\n' + raw.slice(wxStart, end);
+  const selectedWeather = [
+    sectionBetween(wxBlock, /LIDO\/WEATHER SERVICE/i, [/AIRMETs:/i]),
+    sectionBetween(wxBlock, /AIRMETs:/i, [/DESTINATION AIRPORT:/i]),
+    sectionBetween(wxBlock, /DESTINATION AIRPORT:/i, [/DESTINATION ALTERNATE:/i]),
+    sectionBetween(wxBlock, /DESTINATION ALTERNATE:/i, [/ENROUTE AIRPORT\(S\):/i]),
+    sectionBetween(wxBlock, /CRITICAL EDTO AIRPORTS:/i, [/ESCAPE AIRPORT\(S\):/i]),
+    sectionBetween(wxBlock, /DEPARTURE AIRPORT:/i, [/Space Weather Advisory:/i]),
+    sectionBetween(wxBlock, /Space Weather Advisory:/i, [/AIRPORTLIST ENDED/i]),
+  ].filter(Boolean).join('\n\n');
+
+  return windBlock + '\n=== WEATHER PACKAGE (TARGETED) ===\n' + (selectedWeather || wxBlock);
 }
 
 export function extractNotamSection(raw: string): string {
@@ -293,8 +361,21 @@ export function extractNotamSection(raw: string): string {
 
   const afterStart = raw.slice(notamStart);
   const bulletinEnd = afterStart.search(/END OF LIDO-NOTAM-BULLETIN/i);
-  const hardEnd = bulletinEnd > 0 ? bulletinEnd : 120000;
-  const block = afterStart.slice(0, Math.min(hardEnd, 120000));
+  const block = afterStart.slice(0, bulletinEnd > 0 ? bulletinEnd : Math.min(afterStart.length, 180000));
+  const firCodes = routeFirCodes(raw);
+  const targeted = [
+    sectionBetween(block, /LIDO-NOTAM-BULLETIN/i, [/DEPARTURE AIRPORT/i]),
+    sectionBetween(block, /DEPARTURE AIRPORT/i, [/DESTINATION AIRPORT/i]),
+    sectionBetween(block, /DESTINATION AIRPORT/i, [/DESTINATION ALTERNATE\(S\)/i]),
+    sectionBetween(block, /DESTINATION ALTERNATE\(S\)/i, [/(?:^|\n)EDTO SUITABLE ENROUTE AIRPORT\(S\)/i, /(?:^|\n)ENROUTE AIRPORT\(S\):?/i]),
+    sectionBetween(block, /(?:^|\n)EDTO SUITABLE ENROUTE AIRPORT\(S\)/i, [/(?:^|\n)ENROUTE AIRPORT\(S\):?/i]),
+    notamSectionsForCodes(
+      sectionBetween(block, /(?:^|\n)ENROUTE AIRPORT\(S\):?/i, [/EXTENDED AREA AROUND DESTINATION ALTERNATE AIRPORT\(S\)/i, /END OF LIDO-NOTAM-BULLETIN/i]),
+      firCodes,
+      65000,
+      3500,
+    ),
+  ].filter(Boolean).join('\n\n');
 
-  return block.trim();
+  return targeted.trim() || block.slice(0, 120000).trim();
 }
