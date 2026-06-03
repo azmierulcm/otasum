@@ -40,7 +40,7 @@ function stripModuleHeader(text: string): string {
 
 function buildModule(meta: typeof MODULE_META[number], content: string): Module {
   const header = `## MODULE ${meta.number}: ${meta.label.toUpperCase()}`;
-  const body   = content.trim() || '*No data found for this module.*';
+  const body   = stripModuleHeader(content).trim() || '*No data found for this module.*';
   return {
     number: meta.number,
     key:    meta.key,

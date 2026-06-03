@@ -67,6 +67,58 @@ function get(text: string, re: RegExp, g = 1): string | null {
   return text.match(re)?.[g] ?? null;
 }
 
+function compact(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function getAny(text: string, patterns: RegExp[], group = 1): string | null {
+  const flat = compact(text);
+  for (const pattern of patterns) {
+    const match = text.match(pattern) ?? flat.match(pattern);
+    if (match?.[group]) return match[group].trim();
+  }
+  return null;
+}
+
+interface RouteHeader {
+  acType: string;
+  dep: string;
+  etdRaw: string;
+  dest: string;
+  etaRaw: string;
+  destAlt: string;
+}
+
+function parseRouteHeader(raw: string): RouteHeader | null {
+  const match = getAny(raw, [
+    /\b([A-Z]\d{3}[A-Z]?)\s+([A-Z]{4}\/[A-Z0-9]{2,4})\s+(\d{4})\s+UTC\s+([A-Z]{4}\/[A-Z0-9]{2,4})\s+(\d{4})\s+UTC\s+([A-Z]{4}\/[A-Z0-9]{2,4})\b/i,
+    /\b([A-Z]\d{3}[A-Z]?)\s+([A-Z]{4}\/[A-Z0-9]{2,4})\s+(\d{4})\s+UTC\s+([A-Z]{4}\/[A-Z0-9]{2,4})\s+(\d{4})\s+UTC\b/i,
+  ], 0);
+
+  const parts = match?.match(/\b([A-Z]\d{3}[A-Z]?)\s+([A-Z]{4}\/[A-Z0-9]{2,4})\s+(\d{4})\s+UTC\s+([A-Z]{4}\/[A-Z0-9]{2,4})\s+(\d{4})\s+UTC(?:\s+([A-Z]{4}\/[A-Z0-9]{2,4}))?/i);
+  if (!parts) return null;
+
+  return {
+    acType: parts[1],
+    dep: parts[2],
+    etdRaw: parts[3],
+    dest: parts[4],
+    etaRaw: parts[5],
+    destAlt: parts[6] ?? 'N/A',
+  };
+}
+
+function extractRouteString(raw: string): string {
+  const route = getAny(raw, [
+    /ROUTE\s*\/\s*FLT\s+LVL\s*:\s*ROUTE:\s*\S+\s+\S+\s+DEFRTE\s+([\s\S]+?)(?=\s+(?:TAKEOFF\s+ALTN:|3%\s+ERA:|MEL\s*\/|SPECIAL\s+NOTES:))/i,
+    /\bDEFRTE\s+([\s\S]+?)(?=\s+(?:TAKEOFF\s+ALTN:|3%\s+ERA:|MEL\s*\/|SPECIAL\s+NOTES:|FUEL\s+ORDER|LIDO\s+TAKE-OFF))/i,
+  ]);
+
+  return route
+    ? route.replace(/\s+/g, ' ').trim()
+    : 'N/A';
+}
+
 /** Convert Lido date "02 JUN 2026" + time "1530" → ISO "2026-06-02T15:30Z" */
 function toIso(dateStr: string, timeHHMM: string): string {
   const MONTHS: Record<string, string> = {
@@ -113,17 +165,26 @@ function etaIso(dateStr: string, etdHHMM: string, etaHHMM: string): string {
 
 export function extractFlightContext(raw: string): FlightContext {
   // ── Identity ───────────────────────────────────────────────────────────────
-  const callsign    = get(raw, /^([A-Z]+\s+\d+)\s+OFP/m) ?? 'N/A';
-  const airlineIcao = get(raw, /^([A-Z]+)\s+\d+\s+OFP/m) ?? 'N/A';
-  const acType      = get(raw, /^([A-Z]\d{3}[A-Z]?)\s+\w+\/\w+\s+\d{4}\s+UTC/m) ?? 'N/A';
+  const routeHdr    = parseRouteHeader(raw);
+  const callsign    = getAny(raw, [
+    /^([A-Z]+\s+\d+)\s+OFP/m,
+    /\b([A-Z]{2,4}\s*\d{1,4})\s+OFP\b/i,
+  ]) ?? 'N/A';
+  const airlineIcao = getAny(raw, [
+    /^([A-Z]+)\s+\d+\s+OFP/m,
+    /\b([A-Z]{2,4})\s*\d{1,4}\s+OFP\b/i,
+  ]) ?? 'N/A';
+  const acType      = routeHdr?.acType ?? getAny(raw, [
+    /^([A-Z]\d{3}[A-Z]?)\s+\w+\/\w+\s+\d{4}\s+UTC/m,
+    /\b([A-Z]\d{3}[A-Z]?)\s+[A-Z]{4}\/[A-Z0-9]{2,4}\s+\d{4}\s+UTC/i,
+  ]) ?? 'N/A';
   const acCategory  = AC_CATEGORY[acType] ?? 'Cat C/D';
 
   // ── Route header ──────────────────────────────────────────────────────────
-  const routeHdr = raw.match(/^[A-Z]\d{3}[A-Z]?\s+(\w+\/\w+)\s+(\d{4})\s+UTC\s+(\w+\/\w+)\s+(\d{4})\s+UTC/m);
-  const dep       = routeHdr?.[1] ?? 'N/A';
-  const etdRaw    = routeHdr?.[2] ?? '0000';
-  const dest      = routeHdr?.[3] ?? 'N/A';
-  const etaRaw    = routeHdr?.[4] ?? '0000';
+  const dep       = routeHdr?.dep ?? 'N/A';
+  const etdRaw    = routeHdr?.etdRaw ?? '0000';
+  const dest      = routeHdr?.dest ?? 'N/A';
+  const etaRaw    = routeHdr?.etaRaw ?? '0000';
   const depIcao   = dep.split('/')[0];
   const destIcao  = dest.split('/')[0];
   const depName   = AIRPORT_NAMES[depIcao] ?? depIcao;
@@ -137,10 +198,7 @@ export function extractFlightContext(raw: string): FlightContext {
   const etaIsoV = date ? etaIso(date, etdRaw, etaRaw) : 'N/A';
 
   // ── Full route string ─────────────────────────────────────────────────────
-  const routeBodyM = raw.match(/DEFRTE\s*\n([\s\S]+?)(?=\nTAKEOFF ALTN:|\n3%\s+ERA:|\nMEL\s*\/)/i);
-  const routeString = routeBodyM
-    ? routeBodyM[1].split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 3).join(' ')
-    : 'N/A';
+  const routeString = extractRouteString(raw);
 
   // ── SID: second token after DEP ICAO that matches SID pattern ────────────
   const routeParts = routeString.split(/\s+/);
@@ -158,6 +216,8 @@ export function extractFlightContext(raw: string): FlightContext {
   // ── Alternate airports from FMS INFO alternate table ──────────────────────
   const altRe  = /^([A-Z]{4})\s+\d{3}\s+\d+\s+\S/gm;
   const altSet = new Set<string>();
+  const destAltIcao = routeHdr?.destAlt?.split('/')[0];
+  if (destAltIcao && destAltIcao !== 'N/A') altSet.add(destAltIcao);
   let altM: RegExpExecArray | null;
   while ((altM = altRe.exec(raw)) !== null) {
     const icao = altM[1];
@@ -213,32 +273,28 @@ export function extractFlightContext(raw: string): FlightContext {
 // ── Section extractors ────────────────────────────────────────────────────────
 
 export function extractWxSection(raw: string): string {
-  const wxStart  = raw.search(/\nWeather\n/);
-  const crewEnd  = raw.indexOf('Crew Information');
+  const wxStart  = raw.search(/(?:^|\n)\s*Weather\s*(?:\n|$)/i);
+  const crewEnd  = raw.slice(wxStart > -1 ? wxStart : 0).search(/(?:^|\n)\s*Crew Information\s*(?:\n|$)/i);
   if (wxStart < 0) return '[Weather section not found in document]';
-  const end = crewEnd > wxStart ? crewEnd : wxStart + 25000;
+  const end = crewEnd > 0 ? wxStart + crewEnd : wxStart + 35000;
 
   // Prepend upper winds table (before weather section) for segmented analysis
-  const windIdx   = raw.indexOf('WIND INFORMATION');
+  const windIdx   = raw.search(/WIND INFORMATION/i);
   const windBlock = windIdx > 0 && windIdx < wxStart
-    ? '\n=== UPPER WINDS TABLE ===\n' + raw.slice(windIdx, wxStart).slice(0, 15000)
+    ? '\n=== UPPER WINDS TABLE ===\n' + raw.slice(windIdx, wxStart).slice(0, 18000)
     : '';
 
   return windBlock + '\n=== WEATHER PACKAGE ===\n' + raw.slice(wxStart, end);
 }
 
 export function extractNotamSection(raw: string): string {
-  const notamStart = raw.search(/\nNOTAM[S]?\n/);
+  const notamStart = raw.search(/(?:^|\n)\s*NOTAM[S]?\s*(?:\n|$)/i);
   if (notamStart < 0) return '[NOTAM section not found in document]';
 
-  const block = raw.slice(notamStart, notamStart + 60000);
+  const afterStart = raw.slice(notamStart);
+  const bulletinEnd = afterStart.search(/END OF LIDO-NOTAM-BULLETIN/i);
+  const hardEnd = bulletinEnd > 0 ? bulletinEnd : 120000;
+  const block = afterStart.slice(0, Math.min(hardEnd, 120000));
 
-  // Find where ICAO NOTAMs start (pattern: ICAO-prefixed refs like A1234/26 or WMKK A1234/26)
-  const icaoIdx = block.search(/\n[A-Z]{4}\s+[A-Z]\d{4}\/\d{2}|\n[A-Z]\d{4}\/\d{2}\s+NOTAM/);
-  if (icaoIdx > 500) {
-    // Return company NOTAMs too — spec says keep if operationally significant
-    return block.slice(0, icaoIdx + 40000);
-  }
-
-  return block.slice(0, 50000);
+  return block.trim();
 }

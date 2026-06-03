@@ -22,9 +22,34 @@ export async function extractPdfText(
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    const pageText = content.items
-      .map((item) => ('str' in item ? item.str : ''))
-      .join(' ');
+    const textItems: Array<{ str: string; x: number; y: number }> = [];
+    for (const item of content.items) {
+      if (!('str' in item) || !item.str.trim()) continue;
+      const transform = 'transform' in item ? item.transform : [1, 0, 0, 1, 0, 0];
+      textItems.push({
+        str: item.str,
+        x: Number(transform[4] ?? 0),
+        y: Number(transform[5] ?? 0),
+      });
+    }
+
+    const lines = new Map<number, typeof textItems>();
+    for (const item of textItems) {
+      const yKey = Math.round(item.y / 2) * 2;
+      lines.set(yKey, [...(lines.get(yKey) ?? []), item]);
+    }
+
+    const pageText = Array.from(lines.entries())
+      .sort(([a], [b]) => b - a)
+      .map(([, line]) => line
+        .sort((a, b) => a.x - b.x)
+        .map((item) => item.str)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim())
+      .filter(Boolean)
+      .join('\n');
+
     pages.push(pageText);
     onProgress?.(i, pdf.numPages);
   }

@@ -53,20 +53,22 @@ interface EdtoEntry {
 
 function parseEdtoBlock(raw: string): EdtoEntry[] {
   const start = raw.search(/EDTO\s+INFORMATION/i);
-  const end   = raw.search(/ENRTE\s+ALTNS|TERRAIN\s+CLEARANCE/i);
+  const afterStart = start > -1 ? raw.slice(start) : raw;
+  const relativeEnd = afterStart.search(/ENRTE\s+ALTNS|TERRAIN\s+CLEARANCE/i);
   const block = raw.slice(
     start > -1 ? start : 0,
-    end   > start ? end : (start > -1 ? start + 8000 : 8000)
+    relativeEnd > 0 && start > -1 ? start + relativeEnd : (start > -1 ? start + 8000 : 8000)
   );
 
-  // Split on blank lines between entries
-  const chunks = block.split(/\n{2,}/);
   const entries: EdtoEntry[] = [];
+  const lines = block
+    .split('\n')
+    .map(line => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  const rowRe = /^(SETP\d+|EEP|EXP|ETP\d*)\s+(\S+)\s+(\d{4})\s+(\d{4})\s+([\d\/]+)\s+([\d\/]+)\s+[\d.]+\s+([\d.]+)\s+([\d.]+)\s+(\w+)/;
 
-  for (const chunk of chunks) {
-    // Line 1 must start with a recognised label
-    const l1 = chunk.trim().split('\n')[0];
-    const rowRe = /^(SETP\d+|EEP|EXP|ETP\d*)\s+(\S+)\s+(\d{4})\s+(\d{4})\s+([\d\/]+)\s+([\d\/]+)\s+[\d.]+\s+([\d.]+)\s+([\d.]+)\s+(\w+)/;
+  for (let i = 0; i < lines.length; i++) {
+    const l1 = lines[i];
     const m = l1.match(rowRe);
     if (!m) continue;
 
@@ -81,7 +83,7 @@ function parseEdtoBlock(raw: string): EdtoEntry[] {
     const cond   = m[9];
 
     // Line 2: coords + ISA + W/C
-    const l2 = chunk.trim().split('\n')[1] ?? '';
+    const l2 = lines[i + 1] ?? '';
     const coordM = l2.match(/([NS]\d+\.\d+)\s+([EW]\d+\.\d+)/);
     const coords = coordM ? `${coordM[1]} ${coordM[2]}` : undefined;
 
@@ -91,6 +93,28 @@ function parseEdtoBlock(raw: string): EdtoEntry[] {
     const wc  = tokens[1];
 
     entries.push({ label, sap, eltme, timeAap: tAap, dist, mora, cfuelT, fobT, cond, coords, isa, wc });
+  }
+
+  if (entries.length === 0) {
+    const flat = block.replace(/\s+/g, ' ');
+    const pairRe = /\b(SETP\d+|EEP|EXP|ETP\d*)\s+(\S+)\s+(\d{4})\s+(\d{4})\s+([\d\/]+)\s+([\d\/]+)\s+[\d.]+\s+([\d.]+)\s+([\d.]+)\s+(DX|DC)\s+([NS]\d+\.\d+)\s+([EW]\d+\.\d+)(?:\s+\([A-Z]{4}\))?\s+([PM]\d+(?:\/[PM]\d+)?)\s+([PM]\d{3}(?:\/[PM]\d{3})?)/g;
+    let m: RegExpExecArray | null;
+    while ((m = pairRe.exec(flat)) !== null) {
+      entries.push({
+        label: m[1],
+        sap: m[2],
+        eltme: m[3],
+        timeAap: m[4],
+        dist: m[5],
+        mora: m[6],
+        cfuelT: parseFloat(m[7]),
+        fobT: parseFloat(m[8]),
+        cond: m[9],
+        coords: `${m[10]} ${m[11]}`,
+        isa: m[12],
+        wc: m[13],
+      });
+    }
   }
 
   return entries;
@@ -103,6 +127,13 @@ function parseEnrteAltns(raw: string): { icao: string; from: string; to: string;
   let m: RegExpExecArray | null;
   while ((m = re.exec(block)) !== null) {
     out.push({ icao: m[1], from: m[2], to: m[3], wxMin: m[4], fcstWx: m[5] });
+  }
+  if (out.length === 0) {
+    const flat = block.replace(/\s+/g, ' ');
+    const flatRe = /\b([A-Z]{4})\s+([\d:]+)\s+([\d:]+)\s+WX\s+MIN:\s*([\d-]+)\s+FCST\s+WX:\s*([\d-]+)/g;
+    while ((m = flatRe.exec(flat)) !== null) {
+      out.push({ icao: m[1], from: m[2], to: m[3], wxMin: m[4], fcstWx: m[5] });
+    }
   }
   return out;
 }

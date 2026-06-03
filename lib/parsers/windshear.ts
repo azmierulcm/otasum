@@ -61,6 +61,7 @@ export function parseWindshear(raw: string): string {
   // Line-1 format: WPT  FL  W/V  TAS  MTK  WS  | TIME  ELTM | USED
   const allEntries: WptEntry[] = [];
   const wptRe = /^\s*([A-Z][A-Z0-9\/\-]{2,})\s+((?:T-O-C|CLB|DES|\d{3}))\s+(\d{3}\/\d{3})\s+\d{3}\s+\d{3}\s+(\d+)\s*\|/gm;
+  const flatWptRe = /\b([A-Z][A-Z0-9\/\-]{2,})\s+((?:T-O-C|CLB|DES|\d{3}))\s+(\d{3}\/\d{3})\s+\d{3}\s+\d{3}\s+(\d+)\s*\|/g;
 
   let m: RegExpExecArray | null;
   let idx = 0;
@@ -76,6 +77,21 @@ export function parseWindshear(raw: string): string {
       ws:       parseInt(m[4]),
       index:    idx++,
     });
+  }
+  if (allEntries.length === 0) {
+    while ((m = flatWptRe.exec(raw)) !== null) {
+      const wv  = m[3];
+      const [d, s] = wv.split('/');
+      allEntries.push({
+        waypoint: m[1].trim(),
+        fl:       m[2],
+        wv,
+        windDir:  parseInt(d),
+        windSpd:  parseInt(s),
+        ws:       parseInt(m[4]),
+        index:    idx++,
+      });
+    }
   }
 
   // Filter flagged (WS > 0)

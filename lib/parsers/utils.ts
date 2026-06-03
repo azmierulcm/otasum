@@ -15,9 +15,15 @@ export function tonToKg(tonnes: number): number {
 /** Extract (kg, HH:MM) from a Lido fuel label line. Handles optional ICAO code between label and numbers. */
 export function parseFuel(text: string, label: string): FuelEntry | null {
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const m = text.match(new RegExp(`${escaped}[^\n]{0,40}?(\\d{3,6})\\s+(\\d{2}:\\d{2})`, 'i'));
-  if (!m) return null;
-  return { kg: parseInt(m[1]), time: m[2] };
+  const re = new RegExp(`${escaped}[^\n]{0,40}?(\\d{3,6})\\s+(\\d{2}:\\d{2})`, 'ig');
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (label === 'ALTN' && /TAKEOFF\s+$/i.test(text.slice(Math.max(0, m.index - 12), m.index))) {
+      continue;
+    }
+    return { kg: parseInt(m[1]), time: m[2] };
+  }
+  return null;
 }
 
 export function orNA(val: string | null | undefined): string {
