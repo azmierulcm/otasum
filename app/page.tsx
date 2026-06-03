@@ -20,21 +20,30 @@ export default function Home() {
     setError('');
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-
+      // Send raw bytes — avoids Next.js multipart body-size limits (~4 MB cap)
       const response = await fetch('/api/analyze', {
         method: 'POST',
-        body: formData,
+        headers: {
+          'Content-Type': 'application/pdf',
+          'X-File-Name': encodeURIComponent(file.name),
+        },
+        body: file,
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error ?? 'Analysis failed. Check server logs.');
+      // Parse response — surface real server error if not JSON
+      const text = await response.text();
+      let data: { modules?: Module[]; error?: string };
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(text.slice(0, 300) || `Server error (${response.status})`);
       }
 
-      setModules(data.modules);
+      if (!response.ok) {
+        throw new Error(data.error ?? 'Analysis failed.');
+      }
+
+      setModules(data.modules ?? []);
       setState('results');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unexpected error occurred.');

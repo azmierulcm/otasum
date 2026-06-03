@@ -53,18 +53,14 @@ function buildModule(meta: typeof MODULE_META[number], content: string): Module 
 
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File | null;
-
-    if (!file) {
-      return NextResponse.json({ error: 'No file provided.' }, { status: 400 });
-    }
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+    // Raw-byte upload: Content-Type: application/pdf — bypasses multipart size limits
+    const contentType = request.headers.get('content-type') ?? '';
+    if (!contentType.includes('application/pdf')) {
       return NextResponse.json({ error: 'Only PDF files are accepted.' }, { status: 400 });
     }
 
     // ── 1. Extract PDF text ───────────────────────────────────────────────────
-    const buffer  = Buffer.from(await file.arrayBuffer());
+    const buffer  = Buffer.from(await request.arrayBuffer());
     const pdfData = await pdfParse(buffer);
     const rawText = pdfData.text?.trim() ?? '';
 
