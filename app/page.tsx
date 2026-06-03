@@ -1,8 +1,16 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import { addDoc, collection, doc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { deleteObject, getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
 import { Module } from '@/lib/types';
 import { extractPdfText } from '@/lib/pdfExtract';
+import {
+  ensureAnonymousUser,
+  getFirebaseDb,
+  getFirebaseStorage,
+  isFirebaseConfigured,
+} from '@/lib/firebaseClient';
 import UploadZone from '@/components/UploadZone';
 import LoadingState from '@/components/LoadingState';
 import ResultsView from '@/components/ResultsView';
@@ -22,6 +30,92 @@ export default function Home() {
     setError('');
 
     try {
+      if (isFirebaseConfigured()) {
+        const db = getFirebaseDb();
+        const storage = getFirebaseStorage();
+        const user = await ensureAnonymousUser();
+
+        setLoadingMsg('Preparing secure upload...');
+        const analysisRef = await addDoc(collection(db, 'analyses'), {
+          uid: user.uid,
+          fileName: file.name,
+          status: 'uploading',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        const storagePath = `ofp-uploads/${user.uid}/${analysisRef.id}.pdf`;
+        const pdfRef = ref(storage, storagePath);
+        const uploadTask = uploadBytesResumable(pdfRef, file, {
+          contentType: 'application/pdf',
+          customMetadata: {
+            analysisId: analysisRef.id,
+            originalName: file.name,
+          },
+        });
+
+        await new Promise<void>((resolve, reject) => {
+          uploadTask.on(
+            'state_changed',
+            (snapshot) => {
+              const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+              setLoadingMsg(`Uploading flight document... ${pct}%`);
+            },
+            reject,
+            () => resolve(),
+          );
+        });
+
+        await updateDoc(analysisRef, {
+          status: 'processing',
+          storagePath,
+          updatedAt: serverTimestamp(),
+        });
+
+        const fileUrl = await getDownloadURL(pdfRef);
+        setLoadingMsg('Analysing briefing package...');
+        const response = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileUrl,
+            fileName: file.name,
+            analysisId: analysisRef.id,
+            storagePath,
+          }),
+        });
+
+        const responseText = await response.text();
+        let data: { modules?: Module[]; error?: string };
+        try {
+          data = JSON.parse(responseText);
+        } catch {
+          throw new Error(responseText.slice(0, 300) || `Server error (${response.status})`);
+        }
+
+        if (!response.ok) {
+          throw new Error(data.error ?? 'Analysis failed.');
+        }
+
+        const modulesResult = data.modules ?? [];
+        await updateDoc(doc(db, 'analyses', analysisRef.id), {
+          status: 'complete',
+          modules: modulesResult,
+          updatedAt: serverTimestamp(),
+        });
+
+        setModules(modulesResult);
+        setState('results');
+
+        deleteObject(pdfRef)
+          .then(() => updateDoc(doc(db, 'analyses', analysisRef.id), {
+            storageDeletedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          }))
+          .catch(() => undefined);
+        return;
+      }
+
       // ── Step 1: Extract text in the browser (no binary upload needed) ─────
       setLoadingMsg('Extracting flight document text…');
       const rawText = await extractPdfText(file, (page, total) => {

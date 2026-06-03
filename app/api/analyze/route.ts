@@ -7,6 +7,7 @@ import {
   buildNotamMessage,
 } from '@/lib/systemPrompt';
 import { Module } from '@/lib/types';
+import { extractPdfTextFromUrl } from '@/lib/serverPdfExtract';
 import {
   runLocalParsers,
   extractFlightContext,
@@ -52,9 +53,14 @@ function buildModule(meta: typeof MODULE_META[number], content: string): Module 
 
 export async function POST(request: NextRequest) {
   try {
-    // Text is extracted client-side (pdfjs-dist in browser) — we receive only the text
-    const { text, fileName } = await request.json() as { text?: string; fileName?: string };
-    const rawText = text?.trim() ?? '';
+    // Desktop fallback can still send text directly. Mobile/iPad can send a Firebase
+    // download URL so PDF extraction happens on the server instead of the device.
+    const { text, fileUrl, fileName } = await request.json() as {
+      text?: string;
+      fileUrl?: string;
+      fileName?: string;
+    };
+    const rawText = text?.trim() || (fileUrl ? (await extractPdfTextFromUrl(fileUrl)).trim() : '');
 
     if (rawText.length < 200) {
       return NextResponse.json({
