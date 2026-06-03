@@ -1,16 +1,9 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { addDoc, collection, doc, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { deleteObject, getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
 import { Module } from '@/lib/types';
 import { extractPdfText } from '@/lib/pdfExtract';
-import {
-  ensureAnonymousUser,
-  getFirebaseDb,
-  getFirebaseStorage,
-  isFirebaseConfigured,
-} from '@/lib/firebaseClient';
+import { ensureSupabaseUser, isSupabaseConfigured, OFP_BUCKET } from '@/lib/supabaseClient';
 import UploadZone from '@/components/UploadZone';
 import LoadingState from '@/components/LoadingState';
 import ResultsView from '@/components/ResultsView';
@@ -30,58 +23,44 @@ export default function Home() {
     setError('');
 
     try {
-      if (isFirebaseConfigured()) {
-        const db = getFirebaseDb();
-        const storage = getFirebaseStorage();
-        const user = await ensureAnonymousUser();
-
+      if (isSupabaseConfigured()) {
         setLoadingMsg('Preparing secure upload...');
-        const analysisRef = await addDoc(collection(db, 'analyses'), {
-          uid: user.uid,
-          fileName: file.name,
-          status: 'uploading',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+        const { supabase, user } = await ensureSupabaseUser();
+        const uploadId = crypto.randomUUID();
+        const storagePath = `${user.id}/${uploadId}.pdf`;
 
-        const storagePath = `ofp-uploads/${user.uid}/${analysisRef.id}.pdf`;
-        const pdfRef = ref(storage, storagePath);
-        const uploadTask = uploadBytesResumable(pdfRef, file, {
-          contentType: 'application/pdf',
-          customMetadata: {
-            analysisId: analysisRef.id,
-            originalName: file.name,
-          },
-        });
-
-        await new Promise<void>((resolve, reject) => {
-          uploadTask.on(
-            'state_changed',
-            (snapshot) => {
-              const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-              setLoadingMsg(`Uploading flight document... ${pct}%`);
+        setLoadingMsg('Uploading flight document...');
+        const { error: uploadError } = await supabase.storage
+          .from(OFP_BUCKET)
+          .upload(storagePath, file, {
+            contentType: 'application/pdf',
+            upsert: false,
+            metadata: {
+              originalName: file.name,
             },
-            reject,
-            () => resolve(),
-          );
-        });
+          });
 
-        await updateDoc(analysisRef, {
-          status: 'processing',
-          storagePath,
-          updatedAt: serverTimestamp(),
-        });
+        if (uploadError) {
+          throw new Error(uploadError.message);
+        }
 
-        const fileUrl = await getDownloadURL(pdfRef);
+        const { data: signed, error: signedUrlError } = await supabase.storage
+          .from(OFP_BUCKET)
+          .createSignedUrl(storagePath, 10 * 60);
+
+        if (signedUrlError || !signed?.signedUrl) {
+          throw new Error(signedUrlError?.message || 'Could not create signed PDF link.');
+        }
+
         setLoadingMsg('Analysing briefing package...');
         const response = await fetch('/api/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            fileUrl,
+            fileUrl: signed.signedUrl,
             fileName: file.name,
-            analysisId: analysisRef.id,
             storagePath,
+            storageProvider: 'supabase',
           }),
         });
 
@@ -98,21 +77,10 @@ export default function Home() {
         }
 
         const modulesResult = data.modules ?? [];
-        await updateDoc(doc(db, 'analyses', analysisRef.id), {
-          status: 'complete',
-          modules: modulesResult,
-          updatedAt: serverTimestamp(),
-        });
-
         setModules(modulesResult);
         setState('results');
 
-        deleteObject(pdfRef)
-          .then(() => updateDoc(doc(db, 'analyses', analysisRef.id), {
-            storageDeletedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          }))
-          .catch(() => undefined);
+        supabase.storage.from(OFP_BUCKET).remove([storagePath]).catch(() => undefined);
         return;
       }
 

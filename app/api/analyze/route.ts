@@ -53,8 +53,8 @@ function buildModule(meta: typeof MODULE_META[number], content: string): Module 
 
 export async function POST(request: NextRequest) {
   try {
-    // Desktop fallback can still send text directly. Mobile/iPad can send a Firebase
-    // download URL so PDF extraction happens on the server instead of the device.
+    // Desktop fallback can still send text directly. Mobile/iPad can send a signed
+    // storage URL so PDF extraction happens on the server instead of the device.
     const { text, fileUrl, fileName } = await request.json() as {
       text?: string;
       fileUrl?: string;
