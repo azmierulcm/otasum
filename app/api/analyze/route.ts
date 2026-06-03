@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import pdf from 'pdf-parse';
 import {
   WX_SYSTEM_PROMPT,
   NOTAM_SYSTEM_PROMPT,
@@ -7,7 +8,6 @@ import {
   buildNotamMessage,
 } from '@/lib/systemPrompt';
 import { Module } from '@/lib/types';
-import { extractPdfTextFromUrl } from '@/lib/serverPdfExtract';
 import {
   runLocalParsers,
   extractFlightContext,
@@ -15,7 +15,7 @@ import {
   extractNotamSection,
 } from '@/lib/parsers';
 
-export const runtime  = 'nodejs';
+export const runtime = 'nodejs';
 export const maxDuration = 120;
 
 const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -34,7 +34,6 @@ function claudeText(msg: Anthropic.Message): string {
   return block.type === 'text' ? block.text : '';
 }
 
-/** Strip the ## MODULE N: header line from Claude's response — the UI adds its own badge. */
 function stripModuleHeader(text: string): string {
   return text.replace(/^##\s*MODULE\s*\d+:[^\n]*\n*/i, '').trimStart();
 }
@@ -42,76 +41,99 @@ function stripModuleHeader(text: string): string {
 function buildModule(meta: typeof MODULE_META[number], content: string): Module {
   const header = `## MODULE ${meta.number}: ${meta.label.toUpperCase()}`;
   const body   = stripModuleHeader(content).trim() || '*No data found for this module.*';
-  return {
-    number: meta.number,
-    key:    meta.key,
-    label:  meta.label,
-    shortLabel: meta.shortLabel,
-    content: `${header}\n\n${body}`,
-  };
+  return { number: meta.number, key: meta.key, label: meta.label, shortLabel: meta.shortLabel, content: `${header}\n\n${body}` };
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    // Desktop fallback can still send text directly. Mobile/iPad can send a signed
-    // storage URL so PDF extraction happens on the server instead of the device.
-    const { text, fileUrl, fileName } = await request.json() as {
-      text?: string;
-      fileUrl?: string;
-      fileName?: string;
-    };
-    const rawText = text?.trim() || (fileUrl ? (await extractPdfTextFromUrl(fileUrl)).trim() : '');
+  const encoder = new TextEncoder();
 
-    if (rawText.length < 200) {
-      return NextResponse.json({
-        error: 'No usable text received. The PDF may be scanned or image-based — run OCR first.',
-      }, { status: 422 });
-    }
+  const stream = new ReadableStream({
+    async start(controller) {
+      function send(obj: object) {
+        controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'));
+      }
 
-    console.log(`[/api/analyze] ${fileName ?? 'unknown'} — ${rawText.length} chars`);
+      try {
+        // ── 1. Accept binary PDF via FormData ────────────────────────────────
+        const formData = await request.formData();
+        const file = formData.get('file');
 
-    // ── 2. Prepare inputs ─────────────────────────────────────────────────────
-    const ctx         = extractFlightContext(rawText);
-    const wxSection   = extractWxSection(rawText);
-    const notamSection= extractNotamSection(rawText);
+        if (!file || !(file instanceof File)) {
+          send({ type: 'error', message: 'No PDF file received.' });
+          controller.close();
+          return;
+        }
 
-    // ── 3. Run everything in parallel ─────────────────────────────────────────
-    //   • Local parsers  — instant  (modules 1, 4, 5, 6)
-    //   • WX Claude call  — ~8–12s  (module 2)
-    //   • NOTAM Claude call — ~5–8s (module 3)
-    //   Total wall time ≈ max(wx, notam) instead of wx + notam
-    const [local, wxMsg, notamMsg] = await Promise.all([
-      Promise.resolve(runLocalParsers(rawText)),
+        if (file.size > 20 * 1024 * 1024) {
+          send({ type: 'error', message: 'PDF exceeds 20 MB limit.' });
+          controller.close();
+          return;
+        }
 
-      ai.messages.create({
-        model:      'claude-sonnet-4-6',
-        max_tokens: 4096,
-        system:     WX_SYSTEM_PROMPT,
-        messages:   [{ role: 'user', content: buildWxMessage(ctx, wxSection) }],
-      }),
+        // ── 2. Extract text server-side ──────────────────────────────────────
+        const buffer  = Buffer.from(await file.arrayBuffer());
+        const pdfData = await pdf(buffer);
+        const rawText = pdfData.text.trim();
 
-      ai.messages.create({
-        model:      'claude-sonnet-4-6',
-        max_tokens: 3000,
-        system:     NOTAM_SYSTEM_PROMPT,
-        messages:   [{ role: 'user', content: buildNotamMessage(ctx, notamSection) }],
-      }),
-    ]);
+        if (rawText.length < 200) {
+          send({ type: 'error', message: 'Could not extract text from this PDF. It may be scanned or image-based — run OCR first.' });
+          controller.close();
+          return;
+        }
 
-    // ── 4. Assemble 6 modules in order ─────────────────────────────────────────
-    const modules: Module[] = [
-      buildModule(MODULE_META[0], local.ofp),
-      buildModule(MODULE_META[1], stripModuleHeader(claudeText(wxMsg))),
-      buildModule(MODULE_META[2], stripModuleHeader(claudeText(notamMsg))),
-      buildModule(MODULE_META[3], local.windshear),
-      buildModule(MODULE_META[4], local.edto),
-      buildModule(MODULE_META[5], local.fuel),
-    ];
+        console.log(`[/api/analyze] ${file.name} — ${rawText.length} chars`);
 
-    return NextResponse.json({ modules });
-  } catch (err) {
-    console.error('[/api/analyze]', err);
-    const message = err instanceof Error ? err.message : 'Analysis failed.';
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+        // ── 3. Local parsers — stream immediately (< 1 s) ───────────────────
+        const ctx   = extractFlightContext(rawText);
+        const local = runLocalParsers(rawText);
+        send({ type: 'module', data: buildModule(MODULE_META[0], local.ofp) });
+        send({ type: 'module', data: buildModule(MODULE_META[3], local.windshear) });
+        send({ type: 'module', data: buildModule(MODULE_META[4], local.edto) });
+        send({ type: 'module', data: buildModule(MODULE_META[5], local.fuel) });
+
+        // ── 4. Claude calls — both start now, stream each as it finishes ────
+        const wxSection    = extractWxSection(rawText);
+        const notamSection = extractNotamSection(rawText);
+
+        const wxPromise = ai.messages.create({
+          model:      'claude-sonnet-4-6',
+          max_tokens: 4096,
+          system:     WX_SYSTEM_PROMPT,
+          messages:   [{ role: 'user', content: buildWxMessage(ctx, wxSection) }],
+        }).then(msg => {
+          send({ type: 'module', data: buildModule(MODULE_META[1], stripModuleHeader(claudeText(msg))) });
+        }).catch(() => {
+          send({ type: 'module', data: buildModule(MODULE_META[1], '*Weather briefing unavailable — analysis failed.*') });
+        });
+
+        const notamPromise = ai.messages.create({
+          model:      'claude-sonnet-4-6',
+          max_tokens: 3000,
+          system:     NOTAM_SYSTEM_PROMPT,
+          messages:   [{ role: 'user', content: buildNotamMessage(ctx, notamSection) }],
+        }).then(msg => {
+          send({ type: 'module', data: buildModule(MODULE_META[2], stripModuleHeader(claudeText(msg))) });
+        }).catch(() => {
+          send({ type: 'module', data: buildModule(MODULE_META[2], '*NOTAM briefing unavailable — analysis failed.*') });
+        });
+
+        await Promise.all([wxPromise, notamPromise]);
+        send({ type: 'done' });
+        controller.close();
+
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Analysis failed.';
+        send({ type: 'error', message });
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'application/x-ndjson',
+      'Cache-Control': 'no-cache',
+      'X-Accel-Buffering': 'no',
+    },
+  });
 }

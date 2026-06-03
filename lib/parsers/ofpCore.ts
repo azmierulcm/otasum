@@ -209,14 +209,6 @@ export function parseOfpCore(raw: string): string {
   const altnApt   = get(raw, /\bALTN\s+(\w{3})\s+\d{4,6}/) ?? '';
   const possExtra = get(raw, /POSS\s+EXTRA\s+(\d+)T/i);
 
-  let sectorNote = '';
-  if (minSector && toffFuel) {
-    const diff = minSector.kg - toffFuel.kg;
-    if (diff !== 0) {
-      const dir = diff > 0 ? 'exceeds' : 'is below';
-      sectorNote = `\n> **Note:** Minimum Sector Fuel (**${minSector.kg.toLocaleString()} kg**) ${dir} Est T/OFF Fuel (**${toffFuel.kg.toLocaleString()} kg**) by **${Math.abs(diff).toLocaleString()} kg**. T/OFF Fuel used for dispatch as planned.`;
-    }
-  }
 
   // ── Weights ───────────────────────────────────────────────────────────────
   const zfwM  = raw.match(/ZFW\s+(\d{5,6})\s+(\d{5,6})/);
@@ -342,7 +334,6 @@ ${fRow('**Taxi**', taxi)}
 ${fRow('**Block Fuel**', block)}
 ${fRow('**Min Diversion Fuel (MDF)**', mdf)}
 ${possExtra ? `| **Possible Extra Available** | ${parseInt(possExtra).toLocaleString()} kg | — |` : ''}
-${sectorNote}
 
 ---
 

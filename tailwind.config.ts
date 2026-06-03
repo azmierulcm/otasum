@@ -31,6 +31,15 @@ const config: Config = {
         mono: ['var(--font-mono)', 'Menlo', 'monospace'],
       },
       keyframes: {
+        shimmer: {
+          '0%':   { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(350%)' },
+        },
+        'progress-pop': {
+          '0%':   { opacity: '1', transform: 'scaleY(1)' },
+          '80%':  { opacity: '1', transform: 'scaleY(1)' },
+          '100%': { opacity: '0', transform: 'scaleY(0)' },
+        },
         fly: {
           '0%': { transform: 'translateX(-80px) translateY(8px)', opacity: '0' },
           '8%': { opacity: '1' },
@@ -55,6 +64,8 @@ const config: Config = {
         'pulse-ring': 'pulse-ring 2s ease-in-out infinite',
         'fade-in': 'fade-in 0.4s ease-out forwards',
         'slide-up': 'slide-up 0.5s ease-out forwards',
+        shimmer: 'shimmer 1.6s ease-in-out infinite',
+        'progress-pop': 'progress-pop 0.6s ease-out forwards',
       },
       boxShadow: {
         airbnb: '0 6px 20px rgba(0,0,0,0.12)',

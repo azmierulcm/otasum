@@ -2,123 +2,68 @@
 
 import { useState, useCallback } from 'react';
 import { Module } from '@/lib/types';
-import { extractPdfText } from '@/lib/pdfExtract';
-import { ensureSupabaseUser, isSupabaseConfigured, OFP_BUCKET } from '@/lib/supabaseClient';
 import UploadZone from '@/components/UploadZone';
 import LoadingState from '@/components/LoadingState';
 import ResultsView from '@/components/ResultsView';
 
 type AppState = 'idle' | 'loading' | 'results' | 'error';
 
+type StreamEvent =
+  | { type: 'module'; data: Module }
+  | { type: 'done' }
+  | { type: 'error'; message: string };
+
 export default function Home() {
-  const [state, setState] = useState<AppState>('idle');
+  const [state, setState]     = useState<AppState>('idle');
   const [modules, setModules] = useState<Module[]>([]);
-  const [error, setError] = useState('');
+  const [error, setError]     = useState('');
   const [fileName, setFileName] = useState('');
-  const [loadingMsg, setLoadingMsg] = useState('');
 
   const handleFileSubmit = useCallback(async (file: File) => {
     setFileName(file.name);
     setState('loading');
+    setModules([]);
     setError('');
 
     try {
-      if (isSupabaseConfigured()) {
-        setLoadingMsg('Preparing secure upload...');
-        const { supabase, user } = await ensureSupabaseUser();
-        const uploadId = crypto.randomUUID();
-        const storagePath = `${user.id}/${uploadId}.pdf`;
+      const formData = new FormData();
+      formData.append('file', file);
 
-        setLoadingMsg('Uploading flight document...');
-        const { error: uploadError } = await supabase.storage
-          .from(OFP_BUCKET)
-          .upload(storagePath, file, {
-            contentType: 'application/pdf',
-            upsert: false,
-            metadata: {
-              originalName: file.name,
-            },
-          });
-
-        if (uploadError) {
-          throw new Error(uploadError.message);
-        }
-
-        const { data: signed, error: signedUrlError } = await supabase.storage
-          .from(OFP_BUCKET)
-          .createSignedUrl(storagePath, 10 * 60);
-
-        if (signedUrlError || !signed?.signedUrl) {
-          throw new Error(signedUrlError?.message || 'Could not create signed PDF link.');
-        }
-
-        setLoadingMsg('Analysing briefing package...');
-        const response = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fileUrl: signed.signedUrl,
-            fileName: file.name,
-            storagePath,
-            storageProvider: 'supabase',
-          }),
-        });
-
-        const responseText = await response.text();
-        let data: { modules?: Module[]; error?: string };
-        try {
-          data = JSON.parse(responseText);
-        } catch {
-          throw new Error(responseText.slice(0, 300) || `Server error (${response.status})`);
-        }
-
-        if (!response.ok) {
-          throw new Error(data.error ?? 'Analysis failed.');
-        }
-
-        const modulesResult = data.modules ?? [];
-        setModules(modulesResult);
-        setState('results');
-
-        supabase.storage.from(OFP_BUCKET).remove([storagePath]).catch(() => undefined);
-        return;
-      }
-
-      // ── Step 1: Extract text in the browser (no binary upload needed) ─────
-      setLoadingMsg('Extracting flight document text…');
-      const rawText = await extractPdfText(file, (page, total) => {
-        setLoadingMsg(`Reading page ${page} of ${total}…`);
-      });
-
-      if (rawText.trim().length < 200) {
-        throw new Error(
-          'Could not extract text from this PDF. It may be scanned or image-based — run OCR first.',
-        );
-      }
-
-      // ── Step 2: Send text to API (well under any platform payload limit) ──
-      setLoadingMsg('Analysing briefing package…');
       const response = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: rawText, fileName: file.name }),
+        body: formData,
       });
 
-      // Surface real server error if response is not JSON
-      const responseText = await response.text();
-      let data: { modules?: Module[]; error?: string };
-      try {
-        data = JSON.parse(responseText);
-      } catch {
-        throw new Error(responseText.slice(0, 300) || `Server error (${response.status})`);
-      }
+      if (!response.body) throw new Error(`Server error (${response.status})`);
 
-      if (!response.ok) {
-        throw new Error(data.error ?? 'Analysis failed.');
-      }
+      const reader  = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer    = '';
 
-      setModules(data.modules ?? []);
-      setState('results');
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop()!; // hold incomplete last line
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line) as StreamEvent;
+
+          if (event.type === 'error') throw new Error(event.message);
+
+          if (event.type === 'module') {
+            setModules(prev => {
+              const next = prev.filter(m => m.key !== event.data.key);
+              return [...next, event.data].sort((a, b) => a.number - b.number);
+            });
+            // Switch to results as soon as first module lands
+            setState('results');
+          }
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unexpected error occurred.');
       setState('error');
@@ -172,7 +117,7 @@ export default function Home() {
         )}
 
         {state === 'loading' && (
-          <LoadingState fileName={fileName} overrideMsg={loadingMsg} />
+          <LoadingState fileName={fileName} />
         )}
 
         {state === 'results' && (

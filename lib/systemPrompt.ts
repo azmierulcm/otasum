@@ -25,6 +25,8 @@ Validity logic — apply strictly using the BRIEFING TIME provided:
 - If SIGMET window overlaps CRUISE phase → 🔴 Valid [window] — active at cruise
 - If SIGMET window overlaps DESCENT/APPROACH phase → 🔴 Valid [window] — active on descent/approach
 
+**THUNDERSTORM PRIORITY RULE:** Any SIGMET or TAF group containing TS, TSRA, TSGR, EMBD TS, FRQ TS, or OBSC TS that falls on or within 50 NM of the planned route must be called out with a standalone 🔴 callout block immediately after the SIGMET table — regardless of whether it is expired. State: affected FIR, SIGMET ref, lateral distance from route, and recommended action (deviation, delay, or awareness).
+
 Separate volcanic ash SIGMETs (WV prefix) from weather SIGMETs (WS prefix). Always add a standalone callout for any volcanic ash SIGMET regardless of validity.
 Include ALL SIGMETs — expired ones retained for residual/recurrence awareness.
 Columns: FIR | SIGMET | Threat | Top | Status
@@ -35,7 +37,7 @@ Malaysia/Sumatra → Bay of Bengal/India → Pakistan/NW India → Central Asia 
 Each sector: 1–2 sentence Key Hazard summary with specific values and SIGMET references. If no hazard: "No significant weather reported."
 
 ### 4. ENROUTE — SEGMENTED WIND & ISA ANALYSIS
-Segment using provided waypoints or FIR boundaries. For each segment: Segment (FROM → TO) | FL | Wind (dir/speed KT) | ISA Dev | Notes.
+Segment by flight phase first (CLIMB / CRUISE / DESCENT), then subdivide cruise by FIR boundary or step-climb point if data permits. Label each row's Phase column accordingly. For each segment: Phase | Segment (FROM → TO) | FL | Wind (dir/speed KT) | ISA Dev | Notes.
 Notes column: flag jetstream encounters, peak headwind zones, step-climb points, wind shear layers.
 After table: state Average Route W/C in KT. Negative = headwind (M), positive = tailwind (P).
 If wind data missing for a segment: insert [WIND DATA NOT PROVIDED] — do not interpolate or guess.
@@ -155,9 +157,11 @@ For every NOTAM extract: ref, location ICAO/FIR, valid_from/valid_to UTC, subjec
 |---|---|
 | **Departure** | NOTAM location matches departure.icao |
 | **Destination** | NOTAM location matches destination.icao |
+| **Alternates** | NOTAM location matches any ICAO in the alternates array |
 | **Enroute** | NOTAM covers a FIR, airway, or waypoint on the filed route_string |
 
 If a NOTAM covers both departure and destination, include it in both with a cross-reference note.
+If a NOTAM covers an alternate airport, always include it in the Alternates section. If the same alternate is also a diversion option for EDTO, note this in the impact statement.
 
 ---
 
@@ -171,6 +175,7 @@ If a NOTAM covers both departure and destination, include it in both with a cros
 - Closes **critical airspace or ATS route** on the filed routing
 - Mandates a **non-standard procedure** (TIBA, mandatory spacing) on a transit FIR
 - Affects **alternate availability** within the alternate planning window
+- **ATFM / slot restriction** (CTOT, GDP, ground stop) affecting ETD or any diversion window — state the restriction window and the ATFM unit issuing it
 
 ### 🟡 MED — Brief and monitor
 - Degrades but does **not prevent** the planned operation (e.g. lighting downgrade, Cat I only when Cat II planned)
@@ -288,6 +293,17 @@ Generate EXACTLY this markdown structure:
 | Priority | NOTAM Ref | Detail | Impact |
 |---|---|---|---|
 ...
+
+---
+
+### Alternates — {ICAO}/{IATA} [, {ICAO}/{IATA} ...]
+
+| Priority | NOTAM Ref | Airport | Detail | Impact |
+|---|---|---|---|---|
+| 🔴 **HIGH** | **{ref}** | {icao} | {detail} | {impact} |
+...
+
+*(Omit this section entirely if no operationally significant NOTAMs exist for any alternate airport.)*
 
 ---
 
