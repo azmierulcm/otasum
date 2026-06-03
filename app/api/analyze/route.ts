@@ -1,6 +1,5 @@
 import { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import pdf from 'pdf-parse';
 import {
   WX_SYSTEM_PROMPT,
   NOTAM_SYSTEM_PROMPT,
@@ -54,36 +53,23 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        // ── 1. Accept raw binary PDF ─────────────────────────────────────────
-        const fileName   = decodeURIComponent(request.headers.get('x-file-name') ?? 'document.pdf');
-        const arrayBuffer = await request.arrayBuffer();
+        // ── 1. Accept extracted text from browser ────────────────────────────
+        const { text, fileName } = await request.json() as {
+          text?: string;
+          fileName?: string;
+        };
 
-        if (!arrayBuffer.byteLength) {
-          send({ type: 'error', message: 'No PDF received.' });
-          controller.close();
-          return;
-        }
-
-        if (arrayBuffer.byteLength > 20 * 1024 * 1024) {
-          send({ type: 'error', message: 'PDF exceeds 20 MB limit.' });
-          controller.close();
-          return;
-        }
-
-        // ── 2. Extract text server-side ──────────────────────────────────────
-        const buffer  = Buffer.from(arrayBuffer);
-        const pdfData = await pdf(buffer);
-        const rawText = pdfData.text.trim();
+        const rawText = text?.trim() ?? '';
 
         if (rawText.length < 200) {
-          send({ type: 'error', message: 'Could not extract text from this PDF. It may be scanned or image-based — run OCR first.' });
+          send({ type: 'error', message: 'No usable text received. The PDF may be scanned or image-based — run OCR first.' });
           controller.close();
           return;
         }
 
-        console.log(`[/api/analyze] ${fileName} — ${rawText.length} chars`);
+        console.log(`[/api/analyze] ${fileName ?? 'unknown'} — ${rawText.length} chars`);
 
-        // ── 3. Local parsers — stream immediately (< 1 s) ───────────────────
+        // ── 2. Local parsers — stream immediately (< 1 s) ───────────────────
         const ctx   = extractFlightContext(rawText);
         const local = runLocalParsers(rawText);
         send({ type: 'module', data: buildModule(MODULE_META[0], local.ofp) });
@@ -91,7 +77,7 @@ export async function POST(request: NextRequest) {
         send({ type: 'module', data: buildModule(MODULE_META[4], local.edto) });
         send({ type: 'module', data: buildModule(MODULE_META[5], local.fuel) });
 
-        // ── 4. Claude calls — both start now, stream each as it finishes ────
+        // ── 3. Claude calls — both start now, each streams when it finishes ──
         const wxSection    = extractWxSection(rawText);
         const notamSection = extractNotamSection(rawText);
 
@@ -123,7 +109,8 @@ export async function POST(request: NextRequest) {
 
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Analysis failed.';
-        send({ type: 'error', message });
+        const send2 = (obj: object) => controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'));
+        send2({ type: 'error', message });
         controller.close();
       }
     },

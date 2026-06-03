@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { Module } from '@/lib/types';
+import { extractPdfText } from '@/lib/pdfExtract';
 import UploadZone from '@/components/UploadZone';
 import LoadingState from '@/components/LoadingState';
 import ResultsView from '@/components/ResultsView';
@@ -14,39 +15,50 @@ type StreamEvent =
   | { type: 'error'; message: string };
 
 export default function Home() {
-  const [state, setState]     = useState<AppState>('idle');
-  const [modules, setModules] = useState<Module[]>([]);
-  const [error, setError]     = useState('');
+  const [state, setState]       = useState<AppState>('idle');
+  const [modules, setModules]   = useState<Module[]>([]);
+  const [error, setError]       = useState('');
   const [fileName, setFileName] = useState('');
+  const [loadingMsg, setLoadingMsg] = useState('');
 
   const handleFileSubmit = useCallback(async (file: File) => {
     setFileName(file.name);
     setState('loading');
     setModules([]);
     setError('');
+    setLoadingMsg('');
 
     try {
-      // Raw binary POST — simpler than FormData, more reliable on mobile
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/pdf',
-          'X-File-Name': encodeURIComponent(file.name),
-        },
-        body: file,
+      // ── 1. Extract text in the browser (no binary upload, no size limit) ──
+      setLoadingMsg('Extracting flight document text…');
+      const rawText = await extractPdfText(file, (page, total) => {
+        setLoadingMsg(`Reading page ${page} of ${total}…`);
       });
 
-      // Platform-level errors (413, 500 HTML pages) arrive before the stream starts
-      if (!response.ok || !response.body) {
-        const text = await response.text();
-        const isTooBig = response.status === 413 || text.toLowerCase().includes('entity too large');
+      if (rawText.trim().length < 200) {
         throw new Error(
-          isTooBig
-            ? 'PDF is too large. Please compress the file to under 4 MB and retry.'
-            : text.replace(/<[^>]+>/g, '').trim().slice(0, 200) || `Server error (${response.status})`
+          'Could not extract text from this PDF. It may be scanned or image-based — run OCR first.',
         );
       }
 
+      // ── 2. POST extracted text (~500 KB) — well under any platform limit ──
+      setLoadingMsg('Sending to analysis engine…');
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: rawText, fileName: file.name }),
+      });
+
+      // Catch platform-level errors before the stream starts
+      if (!response.ok || !response.body) {
+        const text = await response.text();
+        throw new Error(
+          text.replace(/<[^>]+>/g, '').trim().slice(0, 200) ||
+            `Server error (${response.status})`,
+        );
+      }
+
+      // ── 3. Read NDJSON stream — modules arrive as they complete ──────────
       const reader  = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer    = '';
@@ -91,6 +103,7 @@ export default function Home() {
     setModules([]);
     setError('');
     setFileName('');
+    setLoadingMsg('');
   }, []);
 
   return (
@@ -133,7 +146,7 @@ export default function Home() {
         )}
 
         {state === 'loading' && (
-          <LoadingState fileName={fileName} />
+          <LoadingState fileName={fileName} overrideMsg={loadingMsg} />
         )}
 
         {state === 'results' && (

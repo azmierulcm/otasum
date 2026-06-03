@@ -21,16 +21,23 @@ const MESSAGES = [
 
 const MODULE_LABELS = ['OFP', 'WX', 'NOTAM', 'WS', 'EDTO', 'FUEL'];
 
-export default function LoadingState({ fileName }: { fileName: string }) {
+export default function LoadingState({
+  fileName,
+  overrideMsg,
+}: {
+  fileName: string;
+  overrideMsg?: string;
+}) {
   const [msgIndex, setMsgIndex] = useState(0);
   const [shimmerDot, setShimmerDot] = useState(0);
 
   useEffect(() => {
+    if (overrideMsg) return; // parent controls the message during extraction
     const msgTimer = setInterval(() => {
       setMsgIndex(i => (i + 1) % MESSAGES.length);
     }, 2200);
     return () => clearInterval(msgTimer);
-  }, []);
+  }, [overrideMsg]);
 
   useEffect(() => {
     const dotTimer = setInterval(() => {
@@ -64,13 +71,13 @@ export default function LoadingState({ fileName }: { fileName: string }) {
         <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-[#1B2B5E] via-[#00A699] to-[#FF5A5F] animate-shimmer" />
       </div>
 
-      {/* Witty rotating message */}
+      {/* Status — shows extraction progress when available, witty otherwise */}
       <div className="h-6 flex items-center justify-center mb-8 overflow-hidden">
         <p
-          key={msgIndex}
+          key={overrideMsg ?? msgIndex}
           className="text-sm text-gray-500 italic text-center animate-fade-in px-4"
         >
-          {MESSAGES[msgIndex]}
+          {overrideMsg ?? MESSAGES[msgIndex]}
         </p>
       </div>
 
