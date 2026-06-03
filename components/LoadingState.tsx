@@ -13,15 +13,22 @@ const MESSAGES = [
   'Final checks in progress...',
 ];
 
-export default function LoadingState({ fileName }: { fileName: string }) {
+export default function LoadingState({
+  fileName,
+  overrideMsg,
+}: {
+  fileName: string;
+  overrideMsg?: string;
+}) {
   const [msgIndex, setMsgIndex] = useState(0);
 
   useEffect(() => {
+    if (overrideMsg) return; // parent is controlling the message
     const timer = setInterval(() => {
       setMsgIndex((i) => (i + 1) % MESSAGES.length);
     }, 2500);
     return () => clearInterval(timer);
-  }, []);
+  }, [overrideMsg]);
 
   return (
     <div className="flex flex-col items-center justify-center flex-1 px-6 py-16 select-none">
@@ -42,10 +49,10 @@ export default function LoadingState({ fileName }: { fileName: string }) {
           </p>
         )}
 
-        {/* Cycling status message */}
+        {/* Status message — parent can override with live extraction progress */}
         <div className="h-5 flex items-center justify-center overflow-hidden">
-          <p key={msgIndex} className="text-sm text-gray-500 animate-fade-in">
-            {MESSAGES[msgIndex]}
+          <p key={overrideMsg ?? msgIndex} className="text-sm text-gray-500 animate-fade-in">
+            {overrideMsg ?? MESSAGES[msgIndex]}
           </p>
         </div>
 

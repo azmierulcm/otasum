@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import pdfParse from 'pdf-parse';
 import {
   WX_SYSTEM_PROMPT,
   NOTAM_SYSTEM_PROMPT,
@@ -53,22 +52,17 @@ function buildModule(meta: typeof MODULE_META[number], content: string): Module 
 
 export async function POST(request: NextRequest) {
   try {
-    // Raw-byte upload: Content-Type: application/pdf — bypasses multipart size limits
-    const contentType = request.headers.get('content-type') ?? '';
-    if (!contentType.includes('application/pdf')) {
-      return NextResponse.json({ error: 'Only PDF files are accepted.' }, { status: 400 });
-    }
-
-    // ── 1. Extract PDF text ───────────────────────────────────────────────────
-    const buffer  = Buffer.from(await request.arrayBuffer());
-    const pdfData = await pdfParse(buffer);
-    const rawText = pdfData.text?.trim() ?? '';
+    // Text is extracted client-side (pdfjs-dist in browser) — we receive only the text
+    const { text, fileName } = await request.json() as { text?: string; fileName?: string };
+    const rawText = text?.trim() ?? '';
 
     if (rawText.length < 200) {
       return NextResponse.json({
-        error: 'Could not extract text from this PDF. It may be scanned — run OCR first.',
+        error: 'No usable text received. The PDF may be scanned or image-based — run OCR first.',
       }, { status: 422 });
     }
+
+    console.log(`[/api/analyze] ${fileName ?? 'unknown'} — ${rawText.length} chars`);
 
     // ── 2. Prepare inputs ─────────────────────────────────────────────────────
     const ctx         = extractFlightContext(rawText);

@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { Module } from '@/lib/types';
+import { extractPdfText } from '@/lib/pdfExtract';
 import UploadZone from '@/components/UploadZone';
 import LoadingState from '@/components/LoadingState';
 import ResultsView from '@/components/ResultsView';
@@ -13,6 +14,7 @@ export default function Home() {
   const [modules, setModules] = useState<Module[]>([]);
   const [error, setError] = useState('');
   const [fileName, setFileName] = useState('');
+  const [loadingMsg, setLoadingMsg] = useState('');
 
   const handleFileSubmit = useCallback(async (file: File) => {
     setFileName(file.name);
@@ -20,23 +22,33 @@ export default function Home() {
     setError('');
 
     try {
-      // Send raw bytes — avoids Next.js multipart body-size limits (~4 MB cap)
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/pdf',
-          'X-File-Name': encodeURIComponent(file.name),
-        },
-        body: file,
+      // ── Step 1: Extract text in the browser (no binary upload needed) ─────
+      setLoadingMsg('Extracting flight document text…');
+      const rawText = await extractPdfText(file, (page, total) => {
+        setLoadingMsg(`Reading page ${page} of ${total}…`);
       });
 
-      // Parse response — surface real server error if not JSON
-      const text = await response.text();
+      if (rawText.trim().length < 200) {
+        throw new Error(
+          'Could not extract text from this PDF. It may be scanned or image-based — run OCR first.',
+        );
+      }
+
+      // ── Step 2: Send text to API (well under any platform payload limit) ──
+      setLoadingMsg('Analysing briefing package…');
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: rawText, fileName: file.name }),
+      });
+
+      // Surface real server error if response is not JSON
+      const responseText = await response.text();
       let data: { modules?: Module[]; error?: string };
       try {
-        data = JSON.parse(text);
+        data = JSON.parse(responseText);
       } catch {
-        throw new Error(text.slice(0, 300) || `Server error (${response.status})`);
+        throw new Error(responseText.slice(0, 300) || `Server error (${response.status})`);
       }
 
       if (!response.ok) {
@@ -98,7 +110,7 @@ export default function Home() {
         )}
 
         {state === 'loading' && (
-          <LoadingState fileName={fileName} />
+          <LoadingState fileName={fileName} overrideMsg={loadingMsg} />
         )}
 
         {state === 'results' && (
