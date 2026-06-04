@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { Module } from '@/lib/types';
+import { useState, useCallback, useEffect } from 'react';
+import { Module, MODULE_META } from '@/lib/types';
 import { extractPdfText } from '@/lib/pdfExtract';
 import UploadZone from '@/components/UploadZone';
 import LoadingState from '@/components/LoadingState';
@@ -14,12 +14,78 @@ type StreamEvent =
   | { type: 'done' }
   | { type: 'error'; message: string };
 
+// ── Session persistence ───────────────────────────────────────────────────────
+
+const STORAGE_KEY = 'otasum_session';
+const SESSION_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+interface SavedSession {
+  modules:  Module[];
+  fileName: string;
+  savedAt:  number;
+}
+
+function saveSession(modules: Module[], fileName: string) {
+  try {
+    const session: SavedSession = { modules, fileName, savedAt: Date.now() };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  } catch { /* storage full or unavailable */ }
+}
+
+function loadSession(): SavedSession | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const session: SavedSession = JSON.parse(raw);
+    if (
+      Array.isArray(session.modules) &&
+      session.modules.length > 0 &&
+      Date.now() - session.savedAt < SESSION_TTL
+    ) return session;
+    localStorage.removeItem(STORAGE_KEY); // expired
+  } catch { /* corrupt */ }
+  return null;
+}
+
+function clearSession() {
+  try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+}
+
+function timeAgo(ts: number): string {
+  const mins = Math.round((Date.now() - ts) / 60000);
+  if (mins < 1)  return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h ago`;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function Home() {
-  const [state, setState]       = useState<AppState>('idle');
-  const [modules, setModules]   = useState<Module[]>([]);
-  const [error, setError]       = useState('');
-  const [fileName, setFileName] = useState('');
+  const [state, setState]           = useState<AppState>('idle');
+  const [modules, setModules]       = useState<Module[]>([]);
+  const [error, setError]           = useState('');
+  const [fileName, setFileName]     = useState('');
   const [loadingMsg, setLoadingMsg] = useState('');
+  const [restoredAt, setRestoredAt] = useState<number | null>(null);
+
+  // ── Restore session on mount ──────────────────────────────────────────────
+  useEffect(() => {
+    const session = loadSession();
+    if (session) {
+      setModules(session.modules);
+      setFileName(session.fileName);
+      setRestoredAt(session.savedAt);
+      setState('results');
+    }
+  }, []);
+
+  // ── Persist when all modules are complete ─────────────────────────────────
+  useEffect(() => {
+    if (state === 'results' && modules.length === MODULE_META.length) {
+      saveSession(modules, fileName);
+    }
+  }, [modules, fileName, state]);
 
   const handleFileSubmit = useCallback(async (file: File) => {
     setFileName(file.name);
@@ -27,9 +93,10 @@ export default function Home() {
     setModules([]);
     setError('');
     setLoadingMsg('');
+    setRestoredAt(null);
+    clearSession();
 
     try {
-      // ── 1. Extract text in the browser (no binary upload, no size limit) ──
       setLoadingMsg('Extracting flight document text…');
       const rawText = await extractPdfText(file, (page, total) => {
         setLoadingMsg(`Reading page ${page} of ${total}…`);
@@ -41,7 +108,6 @@ export default function Home() {
         );
       }
 
-      // ── 2. POST extracted text (~500 KB) — well under any platform limit ──
       setLoadingMsg('Sending to analysis engine…');
       const response = await fetch('/api/analyze', {
         method: 'POST',
@@ -49,7 +115,6 @@ export default function Home() {
         body: JSON.stringify({ text: rawText, fileName: file.name }),
       });
 
-      // Catch platform-level errors before the stream starts
       if (!response.ok || !response.body) {
         const text = await response.text();
         throw new Error(
@@ -58,7 +123,6 @@ export default function Home() {
         );
       }
 
-      // ── 3. Read NDJSON stream — modules arrive as they complete ──────────
       const reader  = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer    = '';
@@ -99,11 +163,13 @@ export default function Home() {
   }, []);
 
   const handleReset = useCallback(() => {
+    clearSession();
     setState('idle');
     setModules([]);
     setError('');
     setFileName('');
     setLoadingMsg('');
+    setRestoredAt(null);
   }, []);
 
   return (
@@ -138,6 +204,21 @@ export default function Home() {
           </div>
         </div>
       </header>
+
+      {/* Restored session banner */}
+      {state === 'results' && restoredAt !== null && (
+        <div className="bg-[#1B2B5E]/8 border-b border-[#1B2B5E]/10 px-4 py-2 flex items-center justify-between gap-3 animate-fade-in">
+          <p className="text-xs text-[#1B2B5E] font-medium">
+            📋 Session restored from {timeAgo(restoredAt)}
+          </p>
+          <button
+            onClick={handleReset}
+            className="text-[10px] font-semibold text-[#FF5A5F] hover:underline flex-shrink-0"
+          >
+            Start fresh
+          </button>
+        </div>
+      )}
 
       {/* Main content */}
       <main className="flex flex-col flex-1">
