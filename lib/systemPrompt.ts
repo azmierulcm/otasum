@@ -389,18 +389,29 @@ export interface FlightContext {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function buildWxMessage(ctx: FlightContext, wxData: string): string {
-  return `FLIGHT: ${ctx.callsign} ${ctx.dep}–${ctx.dest}
-ETD: ${ctx.etd} (${ctx.date})
-ETA: ${ctx.eta}
-CRUISE: ${ctx.cruiseLevels}
-ALTERNATES: ${ctx.alts.length ? ctx.alts.join(', ') : '[NOT PROVIDED]'}
-EDTO CRITICAL: ${ctx.edto.length ? ctx.edto.join(', ') : 'None designated'}
-BRIEFING TIME: ${ctx.briefingTime}
+  const depIcao  = ctx.dep.split('/')[0];
+  const destIcao = ctx.dest.split('/')[0];
+  const altList  = ctx.alts.length ? ctx.alts.join(', ') : '[NOT PROVIDED]';
 
---- RAW WEATHER DATA ---
+  return `FLIGHT PARAMETERS:
+Flight: ${ctx.callsign} | ${ctx.dep} (${ctx.depName}) → ${ctx.dest} (${ctx.destName})
+Date: ${ctx.date} | ETD: ${ctx.etd} | ETA: ${ctx.eta}
+Cruise: ${ctx.cruiseLevels} | Peak: ${ctx.peakCruise}
+Briefing Time: ${ctx.briefingTime}
+
+AIRPORTS REQUIRING WEATHER IN THIS BRIEFING:
+  [DEP]  ${depIcao} — ${ctx.depName} — weather at ETD ${ctx.etd}
+  [DEST] ${destIcao} — ${ctx.destName} — weather at ETA ${ctx.eta}  ← MANDATORY OUTPUT SECTION
+  [ALT]  ${altList} — weather at estimated diversion time  ← MANDATORY OUTPUT SECTION
+  [EDTO] ${ctx.edto.length ? ctx.edto.join(', ') : 'None designated'}
+
+--- WEATHER DATA (sections labelled by airport type) ---
 ${wxData}
 
-Generate the Module 2 weather briefing using EXACTLY this level-2 header (no variation):
+MANDATORY: Your output MUST include dedicated sections for:
+  1. ${destIcao} (${ctx.destName}) — Destination weather at ETA ${ctx.eta}
+  2. ${altList} — Alternate weather at diversion time
+
 ## MODULE 2: WEATHER BRIEFING`;
 }
 

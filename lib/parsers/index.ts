@@ -330,29 +330,48 @@ export function extractFlightContext(raw: string): FlightContext {
 // ── Section extractors ────────────────────────────────────────────────────────
 
 export function extractWxSection(raw: string): string {
-  const wxStart  = raw.search(/(?:^|\n)\s*Weather\s*(?:\n|$)/i);
-  const crewEnd  = raw.slice(wxStart > -1 ? wxStart : 0).search(/(?:^|\n)\s*Crew Information\s*(?:\n|$)/i);
+  const wxStart = raw.search(/(?:^|\n)\s*Weather\s*(?:\n|$)/i);
   if (wxStart < 0) return '[Weather section not found in document]';
+  const crewEnd = raw.slice(wxStart).search(/(?:^|\n)\s*Crew Information\s*(?:\n|$)/i);
   const end = crewEnd > 0 ? wxStart + crewEnd : wxStart + 35000;
   const wxBlock = raw.slice(wxStart, end);
 
-  // Prepend upper winds table (before weather section) for segmented analysis
+  // Label a section or skip if empty
+  function labeled(label: string, content: string): string {
+    return content.trim() ? `\n=== ${label} ===\n${content.trim()}` : '';
+  }
+
+  // Permissive section patterns — colon is optional, spacing flexible
+  const DEP_START  = /DEPARTURE AIRPORT[:\s]/i;
+  const DEST_START = /DESTINATION AIRPORT[:\s]/i;
+  const ALT_START  = /DESTINATION ALTERNATE[:\s(]/i;
+  const EDTO_START = /CRITICAL EDTO AIRPORTS?[:\s]/i;
+
+  const sigmetSection = sectionBetween(wxBlock, /(?:LIDO\/WEATHER SERVICE|AIRMETs?[:\s])/i, [DEST_START, DEP_START]);
+  const destSection   = sectionBetween(wxBlock, DEST_START, [ALT_START, /ENROUTE AIRPORT/i]);
+  const altSection    = sectionBetween(wxBlock, ALT_START,  [/ENROUTE AIRPORT\(S\)/i, EDTO_START, /END OF/i]);
+  const edtoSection   = sectionBetween(wxBlock, EDTO_START, [/ESCAPE AIRPORT/i, /DEPARTURE AIRPORT/i]);
+  const depSection    = sectionBetween(wxBlock, DEP_START,  [/Space Weather Advisory/i, /AIRPORTLIST/i]);
+  const spaceWxSection= sectionBetween(wxBlock, /Space Weather Advisory/i, [/AIRPORTLIST ENDED/i]);
+
+  // Upper winds table lives before the weather section
   const windIdx   = raw.search(/WIND INFORMATION/i);
   const windBlock = windIdx > 0 && windIdx < wxStart
-    ? '\n=== UPPER WINDS TABLE ===\n' + raw.slice(windIdx, wxStart).slice(0, 18000)
+    ? labeled('UPPER WINDS TABLE', raw.slice(windIdx, wxStart).slice(0, 18000))
     : '';
 
-  const selectedWeather = [
-    sectionBetween(wxBlock, /LIDO\/WEATHER SERVICE/i, [/AIRMETs:/i]),
-    sectionBetween(wxBlock, /AIRMETs:/i, [/DESTINATION AIRPORT:/i]),
-    sectionBetween(wxBlock, /DESTINATION AIRPORT:/i, [/DESTINATION ALTERNATE:/i]),
-    sectionBetween(wxBlock, /DESTINATION ALTERNATE:/i, [/ENROUTE AIRPORT\(S\):/i]),
-    sectionBetween(wxBlock, /CRITICAL EDTO AIRPORTS:/i, [/ESCAPE AIRPORT\(S\):/i]),
-    sectionBetween(wxBlock, /DEPARTURE AIRPORT:/i, [/Space Weather Advisory:/i]),
-    sectionBetween(wxBlock, /Space Weather Advisory:/i, [/AIRPORTLIST ENDED/i]),
-  ].filter(Boolean).join('\n\n');
+  const labeled_sections = [
+    windBlock,
+    labeled('SIGMETs AND AIRMETS', sigmetSection),
+    labeled('DEPARTURE AIRPORT WEATHER', depSection),
+    labeled('DESTINATION AIRPORT WEATHER', destSection),
+    labeled('DESTINATION ALTERNATE WEATHER', altSection),
+    labeled('EDTO CRITICAL AIRPORT WEATHER', edtoSection),
+    labeled('SPACE WEATHER ADVISORY', spaceWxSection),
+  ].filter(Boolean).join('\n');
 
-  return windBlock + '\n=== WEATHER PACKAGE (TARGETED) ===\n' + (selectedWeather || wxBlock);
+  // Fallback: if none of the labelled sections extracted, send raw block
+  return labeled_sections || wxBlock.slice(0, 35000);
 }
 
 export function extractNotamSection(raw: string): string {
