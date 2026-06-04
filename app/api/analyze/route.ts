@@ -17,17 +17,20 @@ import {
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
-const genai = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY ?? '');
+const GOOGLE_AI_KEY = process.env.GOOGLE_AI_API_KEY ?? '';
+const GEMINI_MODEL  = 'gemini-2.0-flash';
+
+const genai = new GoogleGenerativeAI(GOOGLE_AI_KEY);
 
 // Each model instance carries its own system instruction
 const wxModel = genai.getGenerativeModel({
-  model: 'gemini-2.0-flash',
+  model: GEMINI_MODEL,
   systemInstruction: WX_SYSTEM_PROMPT,
   generationConfig: { maxOutputTokens: 4096 },
 });
 
 const notamModel = genai.getGenerativeModel({
-  model: 'gemini-2.0-flash',
+  model: GEMINI_MODEL,
   systemInstruction: NOTAM_SYSTEM_PROMPT,
   generationConfig: { maxOutputTokens: 3000 },
 });
@@ -85,7 +88,14 @@ export async function POST(request: NextRequest) {
         send({ type: 'module', data: buildModule(MODULE_META[4], local.edto) });
         send({ type: 'module', data: buildModule(MODULE_META[5], local.fuel) });
 
-        // ── 3. Gemini calls — both start now, each streams when it finishes ──
+        // ── 3. Validate API key before calling Gemini ───────────────────────
+        if (!GOOGLE_AI_KEY) {
+          send({ type: 'error', message: 'GOOGLE_AI_API_KEY is not set. Add it to your environment variables.' });
+          controller.close();
+          return;
+        }
+
+        // ── 4. Gemini calls — both start now, each streams when it finishes ──
         const wxSection    = extractWxSection(rawText);
         const notamSection = extractNotamSection(rawText);
 
@@ -96,8 +106,9 @@ export async function POST(request: NextRequest) {
             send({ type: 'module', data: buildModule(MODULE_META[1], wxText) });
           })
           .catch(err => {
-            console.error('[WX Gemini]', err);
-            send({ type: 'module', data: buildModule(MODULE_META[1], '*Weather briefing unavailable — analysis failed.*') });
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error('[WX Gemini]', msg);
+            send({ type: 'module', data: buildModule(MODULE_META[1], `*Weather briefing failed — ${msg}*`) });
           });
 
         const notamPromise = notamModel
@@ -107,8 +118,9 @@ export async function POST(request: NextRequest) {
             send({ type: 'module', data: buildModule(MODULE_META[2], notamText) });
           })
           .catch(err => {
-            console.error('[NOTAM Gemini]', err);
-            send({ type: 'module', data: buildModule(MODULE_META[2], '*NOTAM briefing unavailable — analysis failed.*') });
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error('[NOTAM Gemini]', msg);
+            send({ type: 'module', data: buildModule(MODULE_META[2], `*NOTAM briefing failed — ${msg}*`) });
           });
 
         await Promise.all([wxPromise, notamPromise]);
