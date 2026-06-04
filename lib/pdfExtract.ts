@@ -7,12 +7,24 @@ export async function extractPdfText(
   // Dynamic import — only runs in the browser, never during SSR/prerendering.
   const pdfjsLib = await import('pdfjs-dist');
 
-  // jsdelivr is faster and more reliable on mobile than unpkg.
+  // Try CDN worker (faster). If it fails on this browser (e.g. older iOS Safari
+  // that doesn't support .mjs module workers), fall back to main-thread mode.
   pdfjsLib.GlobalWorkerOptions.workerSrc =
     `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
   const arrayBuffer = await file.arrayBuffer();
-  const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+  // First attempt — with CDN worker
+  let pdfDoc: Awaited<ReturnType<typeof pdfjsLib.getDocument>['promise']>;
+  try {
+    pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  } catch {
+    // Worker failed (common on older iPad/iPhone Safari). Disable worker and
+    // run in main-thread mode — slower but universally compatible.
+    console.warn('[pdfExtract] worker failed, retrying in main-thread mode');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+    pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  }
 
   const pages: string[] = [];
   for (let i = 1; i <= pdfDoc.numPages; i++) {

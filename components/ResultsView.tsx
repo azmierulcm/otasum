@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { Module, MODULE_META } from '@/lib/types';
-import { downloadBriefing } from '@/lib/generateBriefingHtml';
 import MarkdownRenderer from './MarkdownRenderer';
 
 interface ResultsViewProps {
@@ -122,6 +121,9 @@ function DownloadButton({ modules, fileName }: { modules: Module[]; fileName: st
   const handleDownload = async () => {
     setStatus('generating');
     try {
+      // Lazy-load marked + HTML generator — keeps it off the initial page bundle
+      // so any Safari compatibility issues with 'marked' never affect page load.
+      const { downloadBriefing } = await import('@/lib/generateBriefingHtml');
       await downloadBriefing(modules, fileName);
       setStatus('done');
       setTimeout(() => setStatus('idle'), 2500);
