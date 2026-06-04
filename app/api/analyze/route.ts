@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
         const notamSection = extractNotamSection(rawText);
 
         const wxPromise = ai.messages.create({
-          model:      'claude-sonnet-4-6',
+          model:      'claude-haiku-4-5-20251001',
           max_tokens: 4096,
           system:     WX_SYSTEM_PROMPT,
           messages:   [{ role: 'user', content: buildWxMessage(ctx, wxSection) }],
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
         });
 
         const notamPromise = ai.messages.create({
-          model:      'claude-sonnet-4-6',
+          model:      'claude-haiku-4-5-20251001',
           max_tokens: 3000,
           system:     NOTAM_SYSTEM_PROMPT,
           messages:   [{ role: 'user', content: buildNotamMessage(ctx, notamSection) }],
