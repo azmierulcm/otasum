@@ -13,7 +13,7 @@ import {
   extractWxSection,
   extractNotamSection,
 } from '@/lib/parsers';
-import { buildCompactWeatherPayload } from '@/lib/weatherParser';
+import { fetchLiveWeather } from '@/lib/liveWeather';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -54,43 +54,78 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const { text, fileName } = await request.json() as {
-          text?: string;
-          fileName?: string;
-        };
-
+        const { text, fileName } = await request.json() as { text?: string; fileName?: string };
         const rawText = text?.trim() ?? '';
 
         if (rawText.length < 200) {
-          send({ type: 'error', message: 'No usable text received. The PDF may be scanned or image-based — run OCR first.' });
+          send({ type: 'error', message: 'No usable text received. The PDF may be scanned or image-based.' });
           controller.close();
           return;
         }
 
         console.log(`[/api/analyze] ${fileName ?? 'unknown'} — ${rawText.length} chars`);
 
-        // ── Local parsers — stream immediately ───────────────────────────────
-        const ctx   = extractFlightContext(rawText);
-        const local = runLocalParsers(rawText);
+        // ── 1. Extract flight context ─────────────────────────────────────────
+        const ctx = extractFlightContext(rawText);
+        const depIcao  = ctx.dep.split('/')[0];
+        const destIcao = ctx.dest.split('/')[0];
+        const allIcaos = [depIcao, destIcao, ...ctx.alts, ...ctx.edto];
+
+        // ── 2. Run everything in parallel ─────────────────────────────────────
+        //   • Local parsers  (~instant)
+        //   • Live weather   (~1–2 s from AWC API)
+        //   • NOTAM extract  (~instant)
+        //   • OFP wx section for SIGMETs
+        const [local, liveWx, notamSection, wxSection] = await Promise.all([
+          Promise.resolve(runLocalParsers(rawText)),
+          fetchLiveWeather(allIcaos),
+          Promise.resolve(extractNotamSection(rawText)),
+          Promise.resolve(extractWxSection(rawText)),
+        ]);
+
+        // ── 3. Stream local modules immediately ───────────────────────────────
         send({ type: 'module', data: buildModule(MODULE_META[0], local.ofp) });
         send({ type: 'module', data: buildModule(MODULE_META[3], local.windshear) });
         send({ type: 'module', data: buildModule(MODULE_META[4], local.edto) });
         send({ type: 'module', data: buildModule(MODULE_META[5], local.fuel) });
 
-        // ── AI calls — both start now, each streams as it completes ──────────
-        const wxSection    = extractWxSection(rawText);
-        const notamSection = extractNotamSection(rawText);
+        // ── 4. Build compact weather JSON from live data + OFP SIGMETs ───────
+        const sigmetsRaw = wxSection.includes('===')
+          ? (wxSection.match(/=== SIGMETs AND AIRMETS ===([\s\S]+?)(?====|$)/i)?.[1]?.trim() ?? '')
+          : wxSection.slice(0, 4000);
 
-        // Pre-parse METARs/TAFs → compact JSON (~2,500 chars vs 15,000 raw)
-        const compactWx = buildCompactWeatherPayload(wxSection, ctx);
-        console.log(`[/api/analyze] compact wx payload: ${compactWx.length} chars`);
+        const wxPayload = JSON.stringify({
+          flight: {
+            callsign:      ctx.callsign,
+            dep:           ctx.dep,
+            dep_name:      ctx.depName,
+            dest:          ctx.dest,
+            dest_name:     ctx.destName,
+            date:          ctx.date,
+            etd:           ctx.etd,
+            eta:           ctx.eta,
+            briefing_time: ctx.briefingTime,
+            dep_runway:    ctx.depRunway,
+            dest_runway:   ctx.destRunway,
+            cruise:        ctx.cruiseLevels,
+            alternates:    ctx.alts,
+            edto:          ctx.edto,
+          },
+          departure:   liveWx.get(depIcao)  ?? { icao: depIcao,  metar_raw: '', taf_raw: '' },
+          destination: liveWx.get(destIcao) ?? { icao: destIcao, metar_raw: '', taf_raw: '' },
+          alternates:  ctx.alts.map(icao => liveWx.get(icao) ?? { icao, metar_raw: '', taf_raw: '' }),
+          edto:        ctx.edto.map(icao => liveWx.get(icao) ?? { icao, metar_raw: '', taf_raw: '' }),
+          sigmets_raw: sigmetsRaw,
+        }, null, 2);
 
-        // WX → Haiku (structured JSON input, cheap + fast)
+        console.log(`[/api/analyze] wx payload: ${wxPayload.length} chars`);
+
+        // ── 5. AI calls — stream as each completes ────────────────────────────
         const wxPromise = ai.messages.create({
           model:      'claude-haiku-4-5-20251001',
           max_tokens: 6000,
           system:     WX_SYSTEM_PROMPT,
-          messages:   [{ role: 'user', content: buildWxMessage(ctx, compactWx) }],
+          messages:   [{ role: 'user', content: buildWxMessage(ctx, wxPayload) }],
         }).then(msg => {
           send({ type: 'module', data: buildModule(MODULE_META[1], stripModuleHeader(claudeText(msg))) });
         }).catch(err => {
@@ -98,7 +133,6 @@ export async function POST(request: NextRequest) {
           send({ type: 'module', data: buildModule(MODULE_META[1], `*Weather briefing failed — ${detail}*`) });
         });
 
-        // NOTAM → Haiku 4.5 (structured/formulaic, fast and cheap)
         const notamPromise = ai.messages.create({
           model:      'claude-haiku-4-5-20251001',
           max_tokens: 3000,
