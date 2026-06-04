@@ -4,10 +4,10 @@
  * Uses metar-taf-parser to extract and structure METAR/TAF data from the
  * Lido OFP weather section before sending to the AI.
  *
- * Benefits:
- *  - Reduces AI input from ~15,000 raw chars → ~2,500 compact JSON chars
- *  - Data is pre-validated — AI only needs to format, not parse
- *  - Enables Haiku (cheaper) instead of Sonnet for this module
+ * Key improvements over raw text approach:
+ *  - Input tokens: ~15,000 chars → ~2,500 compact JSON
+ *  - Data pre-validated — AI just formats, doesn't parse
+ *  - Enables Haiku instead of Sonnet
  */
 
 import { parseMetar, parseTAF } from 'metar-taf-parser';
@@ -24,10 +24,14 @@ interface WxSections {
   winds:       string;
 }
 
-/** Split the labelled === SECTION === output from extractWxSection into parts */
+/**
+ * Split the labelled === SECTION === output from extractWxSection.
+ * Falls back gracefully when no labels are present (raw wxBlock fallback).
+ */
 export function splitWxSections(wxText: string): WxSections {
   const get = (label: string): string => {
-    const re = new RegExp(`=== ${label} ===([\\s\\S]+?)(?==== [A-Z]|$)`, 'i');
+    // Match === LABEL === followed by content (flexible spacing)
+    const re = new RegExp(`===\\s*${label}\\s*===([\\s\\S]+?)(?===\\s*[A-Z]|$)`, 'i');
     return wxText.match(re)?.[1]?.trim() ?? '';
   };
   return {
@@ -40,35 +44,64 @@ export function splitWxSections(wxText: string): WxSections {
   };
 }
 
-// ── METAR / TAF string extraction from Lido text ──────────────────────────────
+// ── METAR / TAF string extraction ─────────────────────────────────────────────
 
-/** Extract a raw METAR string for a given ICAO from freeform Lido text. */
+/**
+ * Extract a complete METAR string for a given ICAO.
+ * Handles:
+ *  - Multi-line METARs (Lido wraps long METARs)
+ *  - With/without METAR/SPECI prefix
+ *  - = terminator or end-of-section
+ */
 function extractMetarRaw(text: string, icao: string): string | null {
-  // With METAR/SPECI prefix
+  if (!text) return null;
+
+  // Pattern 1: With METAR/SPECI prefix — capture to = terminator (may span lines)
   const withPrefix = new RegExp(
-    `(?:METAR|SPECI)\\s+${icao}\\s+\\d{6}Z[^\\n=]*`,
+    `(?:METAR|SPECI)\\s+${icao}\\s+\\d{6}Z[\\s\\S]{5,400}?(?:=|\\n(?:\\s*\\n|Forecast|TAF\\s|[A-Z]{4}\\s+\\d{6}Z))`,
     'i',
   );
-  // Without prefix (ICAO DDHHMMZ winds...)
+
+  // Pattern 2: Without prefix — ICAO DDHHMMZ winds ...
   const withoutPrefix = new RegExp(
-    `${icao}\\s+\\d{6}Z\\s+(?:AUTO\\s+|COR\\s+)?(?:(?:\\d{3}|VRB)\\d{2}(?:G\\d{2})?(?:KT|MPS)[^\\n=]*)`,
+    `${icao}\\s+\\d{6}Z\\s+(?:AUTO\\s+|COR\\s+)?(?:(?:\\d{3}|VRB)\\d{2}(?:G\\d{2})?(?:KT|MPS))[\\s\\S]{5,300}?(?:=|\\n\\s*\\n)`,
     'i',
   );
-  const raw =
-    text.match(withPrefix)?.[0] ??
-    text.match(withoutPrefix)?.[0] ??
-    null;
-  return raw ? raw.replace(/=\s*$/, '').trim() : null;
+
+  for (const re of [withPrefix, withoutPrefix]) {
+    const m = text.match(re);
+    if (m) {
+      return m[0]
+        .replace(/=\s*$/, '')          // strip = terminator
+        .replace(/\n\s*/g, ' ')        // collapse multi-line into single line
+        .replace(/\s{2,}/g, ' ')       // normalise spaces
+        .trim();
+    }
+  }
+  return null;
 }
 
-/** Extract a raw TAF string for a given ICAO from freeform Lido text. */
+/**
+ * Extract a complete TAF string for a given ICAO.
+ * Captures multi-line TAF blocks up to the = terminator.
+ */
 function extractTafRaw(text: string, icao: string): string | null {
-  const re = new RegExp(
-    `TAF\\s+(?:AMD\\s+|COR\\s+)?${icao}\\s+\\d{6}Z[\\s\\S]+?(?:=|(?=\\n\\n|\\nTAF\\s|\\n[A-Z]{4}\\s+\\d{6}Z|$))`,
+  if (!text) return null;
+
+  // Capture TAF from "TAF [AMD/COR] ICAO DDHHMMZ" to = terminator
+  const withEquals = new RegExp(
+    `TAF\\s+(?:AMD\\s+|COR\\s+)?${icao}\\s+\\d{6}Z[\\s\\S]+?=`,
     'i',
   );
-  const raw = text.match(re)?.[0] ?? null;
-  return raw ? raw.replace(/=\s*$/, '').trim() : null;
+
+  // Fallback: TAF until double newline or next section
+  const withoutEquals = new RegExp(
+    `TAF\\s+(?:AMD\\s+|COR\\s+)?${icao}\\s+\\d{6}Z[\\s\\S]+?(?=\\n\\n|\\n[A-Z]{4}\\s+\\d{6}Z|\\nMETAR\\s|$)`,
+    'i',
+  );
+
+  const m = text.match(withEquals) ?? text.match(withoutEquals);
+  return m ? m[0].replace(/=\s*$/, '').trim() : null;
 }
 
 // ── Compact serialisers ───────────────────────────────────────────────────────
@@ -76,33 +109,53 @@ function extractTafRaw(text: string, icao: string): string | null {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function compactMetar(m: any): object {
   return {
-    time:    m.day != null ? `${m.day}${String(m.hour ?? 0).padStart(2,'0')}${String(m.minute ?? 0).padStart(2,'0')}Z` : null,
-    wind:    m.wind   ? { dir: m.wind.degrees ?? m.wind.direction, speed: m.wind.speed, gust: m.wind.gust ?? null, unit: m.wind.unit } : null,
-    vis:     m.visibility ? m.visibility.value : null,
-    wx:      (m.weatherConditions ?? []).map((w: any) => w.phenomenon ?? w).filter(Boolean),
-    clouds:  (m.clouds ?? []).map((c: any) => ({ qty: c.quantity, height: c.height ?? null, type: c.type ?? null })),
-    temp:    m.temperature ?? null,
-    dew:     m.dewPoint    ?? null,
-    qnh:     m.altimeter?.value ?? null,
-    nosig:   m.nosig ?? false,
+    time:   m.day != null
+      ? `${m.day}${String(m.hour ?? 0).padStart(2, '0')}${String(m.minute ?? 0).padStart(2, '0')}Z`
+      : null,
+    wind:   m.wind ? {
+      dir:   m.wind.degrees ?? m.wind.direction,
+      speed: m.wind.speed,
+      gust:  m.wind.gust ?? null,
+      unit:  m.wind.unit,
+    } : null,
+    vis:    m.visibility?.value ?? null,
+    wx:     (m.weatherConditions ?? []).map((w: any) => w.phenomenon ?? w).filter(Boolean),
+    clouds: (m.clouds ?? []).map((c: any) => ({
+      qty:    c.quantity,
+      height: c.height ?? null,
+      type:   c.type   ?? null,
+    })),
+    temp:  m.temperature ?? null,
+    dew:   m.dewPoint    ?? null,
+    qnh:   m.altimeter?.value ?? null,
+    nosig: m.nosig ?? false,
   };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function compactTaf(t: any): object {
-  const fmtValidity = (v: any) =>
-    v ? `${v.startDay}${String(v.startHour ?? 0).padStart(2,'0')}Z/${v.endDay}${String(v.endHour ?? 0).padStart(2,'0')}Z` : null;
+  const fmtV = (v: any) =>
+    v ? `${v.startDay}${String(v.startHour ?? 0).padStart(2, '0')}Z/${v.endDay}${String(v.endHour ?? 0).padStart(2, '0')}Z` : null;
 
   return {
-    valid:  fmtValidity(t.validity),
+    valid:  fmtV(t.validity),
     trends: (t.trends ?? []).map((tr: any) => ({
-      type:   tr.type   ?? null,
-      valid:  fmtValidity(tr.validity),
+      type:   tr.type ?? null,
+      valid:  fmtV(tr.validity),
       prob:   tr.probability ?? null,
-      wind:   tr.wind ? { dir: tr.wind.degrees ?? tr.wind.direction, speed: tr.wind.speed, gust: tr.wind.gust ?? null, unit: tr.wind.unit } : null,
+      wind:   tr.wind ? {
+        dir:   tr.wind.degrees ?? tr.wind.direction,
+        speed: tr.wind.speed,
+        gust:  tr.wind.gust ?? null,
+        unit:  tr.wind.unit,
+      } : null,
       vis:    tr.visibility?.value ?? null,
       wx:     (tr.weatherConditions ?? []).map((w: any) => w.phenomenon ?? w).filter(Boolean),
-      clouds: (tr.clouds ?? []).map((c: any) => ({ qty: c.quantity, height: c.height ?? null, type: c.type ?? null })),
+      clouds: (tr.clouds ?? []).map((c: any) => ({
+        qty:    c.quantity,
+        height: c.height ?? null,
+        type:   c.type   ?? null,
+      })),
     })),
   };
 }
@@ -110,16 +163,27 @@ function compactTaf(t: any): object {
 // ── Per-airport builder ───────────────────────────────────────────────────────
 
 interface AirportWx {
-  icao:       string;
-  metar_raw:  string;
-  metar?:     object;
-  taf_raw:    string;
-  taf?:       object;
+  icao:      string;
+  metar_raw: string;
+  metar?:    object;
+  taf_raw:   string;
+  taf?:      object;
 }
 
-function buildAirportWx(section: string, icao: string): AirportWx {
-  const metarRaw = extractMetarRaw(section, icao) ?? '';
-  const tafRaw   = extractTafRaw(section, icao)   ?? '';
+/**
+ * Build weather data for one airport.
+ * Tries section-specific text first, then falls back to the full wxText
+ * so data is never missed even when section labelling fails.
+ */
+function buildAirportWx(section: string, icao: string, fullText: string): AirportWx {
+  // Try section first, then full text as fallback
+  const metarRaw =
+    extractMetarRaw(section, icao) ??
+    extractMetarRaw(fullText, icao) ?? '';
+
+  const tafRaw =
+    extractTafRaw(section, icao) ??
+    extractTafRaw(fullText, icao) ?? '';
 
   let metar: object | undefined;
   let taf:   object | undefined;
@@ -137,11 +201,14 @@ function buildAirportWx(section: string, icao: string): AirportWx {
 // ── Main export ───────────────────────────────────────────────────────────────
 
 /**
- * Parse weather data from the OFP weather section and return a compact JSON
- * string ready to be sent to the AI (~2,500 chars vs 15,000 raw chars).
+ * Parse weather data from the OFP weather section and return compact JSON
+ * ready to be sent to the AI (~2,500 chars vs 15,000 raw chars).
  */
 export function buildCompactWeatherPayload(wxText: string, ctx: FlightContext): string {
   const sec = splitWxSections(wxText);
+
+  // Pass full wxText as fallback for every airport lookup
+  const full = wxText;
 
   const payload = {
     flight: {
@@ -160,12 +227,11 @@ export function buildCompactWeatherPayload(wxText: string, ctx: FlightContext): 
       alternates:    ctx.alts,
       edto:          ctx.edto,
     },
-    departure:   buildAirportWx(sec.departure, ctx.dep.split('/')[0]),
-    destination: buildAirportWx(sec.destination, ctx.dest.split('/')[0]),
-    alternates:  ctx.alts.map(icao => buildAirportWx(sec.alternate, icao)),
-    edto:        ctx.edto.map(icao => buildAirportWx(sec.edto, icao)),
-    // SIGMETs kept as raw text — no parser for these
-    sigmets_raw: sec.sigmets.slice(0, 5000),
+    departure:   buildAirportWx(sec.departure,   ctx.dep.split('/')[0],  full),
+    destination: buildAirportWx(sec.destination, ctx.dest.split('/')[0], full),
+    alternates:  ctx.alts.map(icao => buildAirportWx(sec.alternate, icao, full)),
+    edto:        ctx.edto.map(icao => buildAirportWx(sec.edto,      icao, full)),
+    sigmets_raw: sec.sigmets.slice(0, 5000) || wxText.slice(0, 3000),
     winds_raw:   sec.winds.slice(0, 5000),
   };
 
