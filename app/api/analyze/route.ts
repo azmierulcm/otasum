@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 import {
   WX_SYSTEM_PROMPT,
   NOTAM_SYSTEM_PROMPT,
@@ -17,23 +17,7 @@ import {
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
-const GOOGLE_AI_KEY = process.env.GOOGLE_AI_API_KEY ?? '';
-const GEMINI_MODEL  = 'gemini-2.5-flash';
-
-const genai = new GoogleGenerativeAI(GOOGLE_AI_KEY);
-
-// Each model instance carries its own system instruction
-const wxModel = genai.getGenerativeModel({
-  model: GEMINI_MODEL,
-  systemInstruction: WX_SYSTEM_PROMPT,
-  generationConfig: { maxOutputTokens: 4096 },
-});
-
-const notamModel = genai.getGenerativeModel({
-  model: GEMINI_MODEL,
-  systemInstruction: NOTAM_SYSTEM_PROMPT,
-  generationConfig: { maxOutputTokens: 3000 },
-});
+const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const MODULE_META = [
   { number: 1, key: 'ofp',       label: 'OFP Core Summary',  shortLabel: 'OFP'   },
@@ -43,6 +27,11 @@ const MODULE_META = [
   { number: 5, key: 'edto',      label: 'EDTO Breakdown',     shortLabel: 'EDTO'  },
   { number: 6, key: 'fuel',      label: 'Fuel vs MDF',        shortLabel: 'FUEL'  },
 ];
+
+function claudeText(msg: Anthropic.Message): string {
+  const block = msg.content[0];
+  return block.type === 'text' ? block.text : '';
+}
 
 function stripModuleHeader(text: string): string {
   return text.replace(/^##\s*MODULE\s*\d+:[^\n]*\n*/i, '').trimStart();
@@ -64,7 +53,6 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        // ── 1. Accept extracted text from browser ────────────────────────────
         const { text, fileName } = await request.json() as {
           text?: string;
           fileName?: string;
@@ -80,7 +68,7 @@ export async function POST(request: NextRequest) {
 
         console.log(`[/api/analyze] ${fileName ?? 'unknown'} — ${rawText.length} chars`);
 
-        // ── 2. Local parsers — stream immediately (< 1 s) ───────────────────
+        // ── Local parsers — stream immediately ───────────────────────────────
         const ctx   = extractFlightContext(rawText);
         const local = runLocalParsers(rawText);
         send({ type: 'module', data: buildModule(MODULE_META[0], local.ofp) });
@@ -88,40 +76,35 @@ export async function POST(request: NextRequest) {
         send({ type: 'module', data: buildModule(MODULE_META[4], local.edto) });
         send({ type: 'module', data: buildModule(MODULE_META[5], local.fuel) });
 
-        // ── 3. Validate API key before calling Gemini ───────────────────────
-        if (!GOOGLE_AI_KEY) {
-          send({ type: 'error', message: 'GOOGLE_AI_API_KEY is not set. Add it to your environment variables.' });
-          controller.close();
-          return;
-        }
-
-        // ── 4. Gemini calls — both start now, each streams when it finishes ──
+        // ── AI calls — both start now, each streams as it completes ──────────
         const wxSection    = extractWxSection(rawText);
         const notamSection = extractNotamSection(rawText);
 
-        const wxPromise = wxModel
-          .generateContent(buildWxMessage(ctx, wxSection))
-          .then(result => {
-            const wxText = stripModuleHeader(result.response.text());
-            send({ type: 'module', data: buildModule(MODULE_META[1], wxText) });
-          })
-          .catch(err => {
-            const msg = err instanceof Error ? err.message : String(err);
-            console.error('[WX Gemini]', msg);
-            send({ type: 'module', data: buildModule(MODULE_META[1], `*Weather briefing failed — ${msg}*`) });
-          });
+        // WX → Sonnet 4.6 (complex multi-section analysis, safety-critical)
+        const wxPromise = ai.messages.create({
+          model:      'claude-sonnet-4-6',
+          max_tokens: 4096,
+          system:     WX_SYSTEM_PROMPT,
+          messages:   [{ role: 'user', content: buildWxMessage(ctx, wxSection) }],
+        }).then(msg => {
+          send({ type: 'module', data: buildModule(MODULE_META[1], stripModuleHeader(claudeText(msg))) });
+        }).catch(err => {
+          const detail = err instanceof Error ? err.message : String(err);
+          send({ type: 'module', data: buildModule(MODULE_META[1], `*Weather briefing failed — ${detail}*`) });
+        });
 
-        const notamPromise = notamModel
-          .generateContent(buildNotamMessage(ctx, notamSection))
-          .then(result => {
-            const notamText = stripModuleHeader(result.response.text());
-            send({ type: 'module', data: buildModule(MODULE_META[2], notamText) });
-          })
-          .catch(err => {
-            const msg = err instanceof Error ? err.message : String(err);
-            console.error('[NOTAM Gemini]', msg);
-            send({ type: 'module', data: buildModule(MODULE_META[2], `*NOTAM briefing failed — ${msg}*`) });
-          });
+        // NOTAM → Haiku 4.5 (structured/formulaic, fast and cheap)
+        const notamPromise = ai.messages.create({
+          model:      'claude-haiku-4-5-20251001',
+          max_tokens: 3000,
+          system:     NOTAM_SYSTEM_PROMPT,
+          messages:   [{ role: 'user', content: buildNotamMessage(ctx, notamSection) }],
+        }).then(msg => {
+          send({ type: 'module', data: buildModule(MODULE_META[2], stripModuleHeader(claudeText(msg))) });
+        }).catch(err => {
+          const detail = err instanceof Error ? err.message : String(err);
+          send({ type: 'module', data: buildModule(MODULE_META[2], `*NOTAM briefing failed — ${detail}*`) });
+        });
 
         await Promise.all([wxPromise, notamPromise]);
         send({ type: 'done' });
