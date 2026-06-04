@@ -70,7 +70,7 @@ const components: Components = {
   ),
   table: ({ children }) => (
     <div className="overflow-x-auto mb-4 rounded-xl border border-gray-200 shadow-sm">
-      <table className="w-full text-xs min-w-max">{children}</table>
+      <table className="w-full text-xs">{children}</table>
     </div>
   ),
   thead: ({ children }) => (
@@ -86,7 +86,7 @@ const components: Components = {
     </th>
   ),
   td: ({ children }) => (
-    <td className="px-3 py-2 text-[#484848] font-mono whitespace-nowrap">{children}</td>
+    <td className="px-3 py-2 text-[#484848] font-mono align-top">{children}</td>
   ),
   hr: () => <hr className="my-5 border-gray-200" />,
 };

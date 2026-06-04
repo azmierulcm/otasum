@@ -305,7 +305,7 @@ For route segments: \`**L750 RANAH–BIROS**\`
 
 ## OUTPUT FORMAT
 
-Generate EXACTLY this markdown structure. Use the card format below — one card per NOTAM — for mobile readability:
+Generate EXACTLY this markdown structure. Use a 3-column table per section:
 
 \`\`\`
 ## MODULE 3: OPERATIONALLY SIGNIFICANT NOTAMs
@@ -316,38 +316,28 @@ Generate EXACTLY this markdown structure. Use the card format below — one card
 
 ### Departure — {ICAO}/{IATA}
 
-🔴 **HIGH — {ref}**
-{detail} {impact}
-
----
-
-🟡 **MED — {ref}**
-{detail} {impact}
-
----
-
-🟢 **INFO — {ref}**
-{detail} {impact}
+| Priority | NOTAM Ref | Detail |
+|---|---|---|
+| 🔴 HIGH | **{ref}** | **{subject}.** {validity}. {current state}. {impact and action if required}. |
+| 🟡 MED | **{ref}** | **{subject}.** {validity}. {impact}. |
+| 🟢 INFO | **{ref}** | {subject}. {validity}. {awareness note}. |
 
 ---
 
 ### Destination — {ICAO}/{IATA}
 
-🔴 **HIGH — {ref}**
-{detail} {impact}
-
----
-
-*(repeat pattern for each NOTAM)*
+| Priority | NOTAM Ref | Detail |
+|---|---|---|
+...
 
 ---
 
 ### Alternates — {ICAO}/{IATA} [, {ICAO}/{IATA} ...]
 
-🔴 **HIGH — {ref} ({icao})**
-{detail} {impact}
-
----
+| Priority | NOTAM Ref | Detail |
+|---|---|---|
+| 🔴 HIGH | **{ref}** ({icao}) | **{subject}.** {impact}. |
+...
 
 *(Omit this section entirely if no operationally significant NOTAMs exist for any alternate airport.)*
 
@@ -355,12 +345,10 @@ Generate EXACTLY this markdown structure. Use the card format below — one card
 
 ### Enroute — Operationally Significant
 
-**{Full FIR name} ({ICAO}) — {ref}**
-{impact}
-
----
-
-*(repeat for each enroute NOTAM)*
+| FIR / Area | NOTAM Ref | Impact |
+|---|---|---|
+| **{Full FIR name} ({ICAO})** | **{ref}** — {brief subject} | {impact and action} |
+...
 \`\`\``;
 
 // ─────────────────────────────────────────────────────────────────────────────
