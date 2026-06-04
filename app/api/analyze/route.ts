@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
         // WX → Sonnet 4.6 (complex multi-section analysis, safety-critical)
         const wxPromise = ai.messages.create({
           model:      'claude-sonnet-4-6',
-          max_tokens: 4096,
+          max_tokens: 8000,
           system:     WX_SYSTEM_PROMPT,
           messages:   [{ role: 'user', content: buildWxMessage(ctx, wxSection) }],
         }).then(msg => {

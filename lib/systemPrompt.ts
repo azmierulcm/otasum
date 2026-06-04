@@ -9,6 +9,7 @@ CRITICAL RULES:
 - If a data field is missing, mark it [NOT PROVIDED].
 - All times in UTC (Zulu). All visibility values include units (m or km). Wind format: direction/speedKT or direction/speedGgustKT.
 - Do NOT include image placeholders or any lines referencing images/satellite/radar — text only.
+- OUTPUT PRIORITY ORDER: If you must trim content due to length, trim SIGMET table rows and enroute sector detail FIRST. DESTINATION and ALTERNATES sections must ALWAYS be fully completed — they are the most operationally critical sections for fuel planning decisions. Never truncate or leave these sections incomplete.
 
 ---
 
