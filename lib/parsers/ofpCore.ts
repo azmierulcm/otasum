@@ -68,6 +68,17 @@ function extractRoute(raw: string): string {
     .trim();
 }
 
+/** Break a space-separated route string into wrapped lines of N waypoints each */
+function fmtRoute(raw: string, perLine = 6): string {
+  if (!raw || raw === 'N/A') return 'N/A';
+  const parts = raw.trim().split(/\s+/);
+  const lines: string[] = [];
+  for (let i = 0; i < parts.length; i += perLine) {
+    lines.push(parts.slice(i, i + perLine).join(' '));
+  }
+  return lines.join('\n');
+}
+
 function sliceFrom(flat: string, startRe: RegExp, endRes: RegExp[]): string {
   const start = flat.search(startRe);
   if (start < 0) return '';
@@ -314,7 +325,9 @@ export function parseOfpCore(raw: string): string {
 | **Block Time** | ${blkTime} HRS |
 | **Flight Time** | ${fltTime} HRS |
 | **OFP Number** | ${orNA(ofpNum)} |
-| **Routing** | ${fullRoute} |
+
+**Route:**
+${fmtRoute(fullRoute)}
 
 ---
 
@@ -333,7 +346,7 @@ ${fRow('**Est T/OFF Fuel**', toffFuel)}
 ${fRow('**Taxi**', taxi)}
 ${fRow('**Block Fuel**', block)}
 ${fRow('**Min Diversion Fuel (MDF)**', mdf)}
-${possExtra ? `| **Possible Extra Available** | ${parseInt(possExtra).toLocaleString()} kg | — |` : ''}
+${possExtra ? `| **Allowable Extra Fuel** | ${parseInt(possExtra).toLocaleString()} kg | — |` : ''}
 
 ---
 

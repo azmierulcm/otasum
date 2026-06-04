@@ -54,6 +54,40 @@ function buildBriefing(peak: WptEntry, windDelta: number | null): string {
   return lines.join(' ') || 'No specific action triggers met for this shear value.';
 }
 
+// ── WS group renderer (max 5 shown per tier, remainder noted) ─────────────────
+
+function buildWsGroups(sortedFlagged: WptEntry[], peak: WptEntry): string {
+  const LIMIT = 5;
+
+  function renderGroup(entries: WptEntry[], emoji: string, label: string): string {
+    if (entries.length === 0) return '';
+    const shown   = entries.slice(0, LIMIT);
+    const hiddenN = entries.length - shown.length;
+
+    const rows = shown
+      .map(e =>
+        `| ${wsEmoji(e.ws)} **${e.ws}** | ${e.index === peak.index ? `**${e.waypoint} ★**` : e.waypoint} | ${flDisplay(e.fl)} | ${e.wv} |`
+      )
+      .join('\n');
+
+    const hiddenNote = hiddenN > 0
+      ? `\n> *+ ${hiddenN} more ${label.toLowerCase()} ${hiddenN === 1 ? 'entry' : 'entries'} not shown.*`
+      : '';
+
+    return `**${emoji} ${label}** (${entries.length})\n\n| WS | Waypoint | FL | Wind (W/V) |\n|---|---|---|---|\n${rows}${hiddenNote}`;
+  }
+
+  const red    = sortedFlagged.filter(e => e.ws >= 6);
+  const yellow = sortedFlagged.filter(e => e.ws >= 3 && e.ws < 6);
+  const green  = sortedFlagged.filter(e => e.ws > 0 && e.ws < 3);
+
+  return [
+    renderGroup(red,    '🔴', 'Red — WS ≥ 6'),
+    renderGroup(yellow, '🟡', 'Yellow — WS 3–5'),
+    renderGroup(green,  '🟢', 'Green — WS 1–2'),
+  ].filter(Boolean).join('\n\n');
+}
+
 // ── Main parser ───────────────────────────────────────────────────────────────
 
 export function parseWindshear(raw: string): string {
@@ -184,13 +218,9 @@ ${briefing}
 
 ---
 
-### WS Flags — Full Profile
+### WS Flags — By Severity
 
-| WS | Waypoint | FL | Wind (W/V) |
-|---|---|---|---|
-${sortedFlagged.map(e =>
-  `| ${wsEmoji(e.ws)} **${e.ws}** | ${e.index === peak.index ? `**${e.waypoint} ★**` : e.waypoint} | ${flDisplay(e.fl)} | ${e.wv} |`
-).join('\n')}
+${buildWsGroups(sortedFlagged, peak)}
 
 *WS index = velocity differential across the waypoint. Higher = greater shear gradient.*`;
 }

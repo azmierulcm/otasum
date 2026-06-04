@@ -45,15 +45,17 @@ If wind data missing for a segment: insert [WIND DATA NOT PROVIDED] — do not i
 ### 5. DESTINATION
 - Parse METAR: Wind, Temp/QNH, Visibility, Cloud/NCD.
 - TAF period table: each BECMG, TEMPO, PROB group as a separate row with time window and conditions.
-- Crosswind analysis on expected landing runway if data available.
+- Crosswind analysis on expected landing runway if data available — state crosswind component in KT and whether it is within limits.
 - NOTAM check: night curfew vs ETA, ILS/approach aid status, OCA(H) changes.
+- **Operational Impact paragraph (MANDATORY):** State the actual arrival conditions expected at ETA — visibility, ceiling, wind, and precipitation. Explicitly state whether the destination is above minima at ETA. Flag any deterioration trend and at what time conditions are forecast to drop below Cat I/II/III limits. State what fuel action is required if conditions are at or near minima.
 - Bottom Line callout: workable arrival window, deterioration point, operational floor, fuel action if conditions warrant.
 
 ### 6. DESTINATION ALTERNATES
 Summary table: Airport | METAR | Key TAF Concern | Usable?
 Usability: ✅ above minima with acceptable forecast | ⚠️ marginal | 🔴 not recommended
-For the PRIMARY alternate: full detailed breakdown table (same element-by-element format as Departure).
-End with Alternate Recommendation note.
+For the PRIMARY alternate: full detailed breakdown table (same element-by-element format as Departure) including METAR elements, TAF concern, and crosswind on the expected runway.
+**Operational Impact paragraph (MANDATORY for primary alternate):** Explain whether the alternate is genuinely usable at the expected diversion time, what the forecast conditions are, and any concerns (fog, low visibility, thunderstorms, runway limitations). State whether it meets the fuel planning assumptions.
+End with Alternate Recommendation note stating clearly whether the alternate is adequate or if a better option should be considered.
 
 ### 7. EDTO / CRITICAL AIRPORTS
 Only airports designated as EDTO critical in the flight plan.
@@ -269,7 +271,7 @@ For route segments: \`**L750 RANAH–BIROS**\`
 
 ## OUTPUT FORMAT
 
-Generate EXACTLY this markdown structure:
+Generate EXACTLY this markdown structure. Use the card format below — one card per NOTAM — for mobile readability:
 
 \`\`\`
 ## MODULE 3: OPERATIONALLY SIGNIFICANT NOTAMs
@@ -280,28 +282,38 @@ Generate EXACTLY this markdown structure:
 
 ### Departure — {ICAO}/{IATA}
 
-| Priority | NOTAM Ref | Detail | Impact |
-|---|---|---|---|
-| 🔴 **HIGH** | **{ref}** | {detail} | {impact} |
-| 🟡 **MED**  | **{ref}** | {detail} | {impact} |
-| 🟢 **INFO** | **{ref}** | {detail} | {impact} |
+🔴 **HIGH — {ref}**
+{detail} {impact}
+
+---
+
+🟡 **MED — {ref}**
+{detail} {impact}
+
+---
+
+🟢 **INFO — {ref}**
+{detail} {impact}
 
 ---
 
 ### Destination — {ICAO}/{IATA}
 
-| Priority | NOTAM Ref | Detail | Impact |
-|---|---|---|---|
-...
+🔴 **HIGH — {ref}**
+{detail} {impact}
+
+---
+
+*(repeat pattern for each NOTAM)*
 
 ---
 
 ### Alternates — {ICAO}/{IATA} [, {ICAO}/{IATA} ...]
 
-| Priority | NOTAM Ref | Airport | Detail | Impact |
-|---|---|---|---|---|
-| 🔴 **HIGH** | **{ref}** | {icao} | {detail} | {impact} |
-...
+🔴 **HIGH — {ref} ({icao})**
+{detail} {impact}
+
+---
 
 *(Omit this section entirely if no operationally significant NOTAMs exist for any alternate airport.)*
 
@@ -309,10 +321,12 @@ Generate EXACTLY this markdown structure:
 
 ### Enroute — Operationally Significant
 
-| FIR / Area | NOTAM Ref | Impact |
-|---|---|---|
-| **{FIR name} ({ICAO})** | **{ref}** — {brief subject} | {impact} |
-...
+**{Full FIR name} ({ICAO}) — {ref}**
+{impact}
+
+---
+
+*(repeat for each enroute NOTAM)*
 \`\`\``;
 
 // ─────────────────────────────────────────────────────────────────────────────
