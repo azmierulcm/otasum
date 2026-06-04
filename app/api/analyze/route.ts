@@ -13,6 +13,7 @@ import {
   extractWxSection,
   extractNotamSection,
 } from '@/lib/parsers';
+import { buildCompactWeatherPayload } from '@/lib/weatherParser';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -80,12 +81,16 @@ export async function POST(request: NextRequest) {
         const wxSection    = extractWxSection(rawText);
         const notamSection = extractNotamSection(rawText);
 
-        // WX → Sonnet 4.6 (complex multi-section analysis, safety-critical)
+        // Pre-parse METARs/TAFs → compact JSON (~2,500 chars vs 15,000 raw)
+        const compactWx = buildCompactWeatherPayload(wxSection, ctx);
+        console.log(`[/api/analyze] compact wx payload: ${compactWx.length} chars`);
+
+        // WX → Haiku (structured JSON input, cheap + fast)
         const wxPromise = ai.messages.create({
-          model:      'claude-sonnet-4-6',
-          max_tokens: 8000,
+          model:      'claude-haiku-4-5-20251001',
+          max_tokens: 6000,
           system:     WX_SYSTEM_PROMPT,
-          messages:   [{ role: 'user', content: buildWxMessage(ctx, wxSection) }],
+          messages:   [{ role: 'user', content: buildWxMessage(ctx, compactWx) }],
         }).then(msg => {
           send({ type: 'module', data: buildModule(MODULE_META[1], stripModuleHeader(claudeText(msg))) });
         }).catch(err => {
