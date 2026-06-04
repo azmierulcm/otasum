@@ -18,6 +18,7 @@ body {
   color: #484848;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior: none; /* prevent pull-to-refresh on mobile */
 }
 
 /* Safe area for iOS notch / home bar */
