@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Module, MODULE_META } from '@/lib/types';
+import { downloadBriefing } from '@/lib/generateBriefingHtml';
 import MarkdownRenderer from './MarkdownRenderer';
 
 interface ResultsViewProps {
@@ -115,6 +116,36 @@ function NotamSkeleton() {
   );
 }
 
+function DownloadButton({ modules, fileName }: { modules: Module[]; fileName: string }) {
+  const [status, setStatus] = useState<'idle' | 'generating' | 'done'>('idle');
+
+  const handleDownload = async () => {
+    setStatus('generating');
+    try {
+      await downloadBriefing(modules, fileName);
+      setStatus('done');
+      setTimeout(() => setStatus('idle'), 2500);
+    } catch {
+      setStatus('idle');
+    }
+  };
+
+  return (
+    <button
+      onClick={handleDownload}
+      disabled={status === 'generating'}
+      className="flex items-center gap-1.5 text-xs font-semibold text-[#00A699] border border-[#00A699] rounded-full px-3 py-1 hover:bg-teal-50 active:bg-teal-100 transition-colors disabled:opacity-50"
+    >
+      <span className="text-sm">
+        {status === 'generating' ? '⏳' : status === 'done' ? '✓' : '⬇'}
+      </span>
+      <span>
+        {status === 'generating' ? 'Generating…' : status === 'done' ? 'Saved!' : 'Download'}
+      </span>
+    </button>
+  );
+}
+
 function ModuleLoadingSkeleton({ moduleKey }: { moduleKey: string }) {
   const quips   = SKELETON_QUIPS[moduleKey] ?? ['Awaiting AI analysis…'];
   const [idx, setIdx]       = useState(0);
@@ -179,11 +210,14 @@ export default function ResultsView({ modules, fileName, onReset }: ResultsViewP
           <span className="text-base flex-shrink-0">📄</span>
           <p className="text-xs text-gray-500 font-mono truncate">{fileName}</p>
         </div>
-        <div className="flex items-center gap-3 flex-shrink-0">
+        <div className="flex items-center gap-2 flex-shrink-0">
           {!allDone && (
             <span className="text-[10px] font-semibold text-[#00A699] tabular-nums">
               {received}/{total} modules
             </span>
+          )}
+          {allDone && (
+            <DownloadButton modules={modules} fileName={fileName} />
           )}
           <button
             onClick={onReset}
