@@ -18,7 +18,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 120;
 
 const GOOGLE_AI_KEY = process.env.GOOGLE_AI_API_KEY ?? '';
-const GEMINI_MODEL  = 'gemini-2.0-flash';
+const GEMINI_MODEL  = 'gemini-2.5-flash';
 
 const genai = new GoogleGenerativeAI(GOOGLE_AI_KEY);
 
