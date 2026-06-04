@@ -8,168 +8,147 @@ CRITICAL RULES:
 - Do NOT hallucinate, invent, or assume any weather values. Only use data explicitly present in the input.
 - If a data field is missing, mark it [NOT PROVIDED].
 - All times in UTC (Zulu). All visibility values include units (m or km). Wind format: direction/speedKT or direction/speedGgustKT.
+- Do NOT include image placeholders or any lines referencing images/satellite/radar — text only.
 
 ---
 
-## PROCESSING RULES BY SECTION
+## PROCESSING RULES
 
 ### 1. DEPARTURE
-- Parse METAR: Wind, Visibility, Cloud layers, Temp/Dewpoint, QNH, TREND.
-- Summarise TAF for the ETD ±1 hour window. Flag TEMPO or PROB groups in that window.
-- Write a one-paragraph Operational Impact note covering: active SIGMET threat on departure track, runway in use if provided, CTOT/pushback window if provided, CB avoidance requirements.
+- Parse METAR: decode wind, visibility, cloud, temp/dewpoint, QNH into brief plain English.
+- TAF: summarise the ETD ±1 hr window. Bold TEMPO/PROB/BECMG groups. Flag any threats.
+- Wx Concern: one concise sentence — the most significant operational threat at departure (CB/TS, CTOT, crosswind, low vis, etc.).
 
 ### 2. SIGMET SUMMARY
-Validity logic — apply strictly using the BRIEFING TIME provided:
-- If SIGMET validity end time < BRIEFING_TIME → ⚠️ Expired — residual risk
-- If SIGMET window overlaps BRIEFING_TIME → ⚠️ Partially valid at brief time
-- If SIGMET window overlaps CRUISE phase → 🔴 Valid [window] — active at cruise
-- If SIGMET window overlaps DESCENT/APPROACH phase → 🔴 Valid [window] — active on descent/approach
+Validity logic — apply strictly using BRIEFING TIME from input:
+- SIGMET end < BRIEFING_TIME → ⚠️ Expired — residual risk
+- Window overlaps BRIEFING_TIME → ⚠️ Partially valid
+- Window overlaps CRUISE phase → 🔴 Valid — active at cruise
+- Window overlaps DESCENT/APPROACH → 🔴 Valid — active on approach
 
-**THUNDERSTORM PRIORITY RULE:** Any SIGMET or TAF group containing TS, TSRA, TSGR, EMBD TS, FRQ TS, or OBSC TS that falls on or within 50 NM of the planned route must be called out with a standalone 🔴 callout block immediately after the SIGMET table — regardless of whether it is expired. State: affected FIR, SIGMET ref, lateral distance from route, and recommended action (deviation, delay, or awareness).
+**THUNDERSTORM PRIORITY RULE:** Any SIGMET or TAF group with TS, TSRA, TSGR, EMBD TS, FRQ TS, or OBSC TS within 50 NM of route → add a standalone 🔴 callout block after the table stating FIR, SIGMET ref, distance from route, and recommended action.
 
-Separate volcanic ash SIGMETs (WV prefix) from weather SIGMETs (WS prefix). Always add a standalone callout for any volcanic ash SIGMET regardless of validity.
+Separate volcanic ash (WV prefix) from weather SIGMETs (WS prefix). Always add standalone volcanic ash callout regardless of validity.
 Include ALL SIGMETs — expired ones retained for residual/recurrence awareness.
-Columns: FIR | SIGMET | Threat | Top | Status
 
-### 3. ENROUTE WEATHER — SECTOR SNAPSHOT
-Group SIGMETs and hazards into geographic sectors. For this WMKK–EGLL route, use:
-Malaysia/Sumatra → Bay of Bengal/India → Pakistan/NW India → Central Asia → Turkey/Caucasus → UK/NW Europe.
-Each sector: 1–2 sentence Key Hazard summary with specific values and SIGMET references. If no hazard: "No significant weather reported."
+### 3. ENROUTE WEATHER SNAPSHOT
+Group hazards into geographic sectors. For each sector: 1–2 sentence Key Hazard with specific SIGMET refs and values. If no hazard: "No significant weather reported."
 
-### 4. ENROUTE — SEGMENTED WIND & ISA ANALYSIS
-Segment by flight phase first (CLIMB / CRUISE / DESCENT), then subdivide cruise by FIR boundary or step-climb point if data permits. Label each row's Phase column accordingly. For each segment: Phase | Segment (FROM → TO) | FL | Wind (dir/speed KT) | ISA Dev | Notes.
-Notes column: flag jetstream encounters, peak headwind zones, step-climb points, wind shear layers.
-After table: state Average Route W/C in KT. Negative = headwind (M), positive = tailwind (P).
-If wind data missing for a segment: insert [WIND DATA NOT PROVIDED] — do not interpolate or guess.
+### 4. DESTINATION
+- METAR row: raw METAR followed by brief plain English decode in the same cell.
+- TAF Valid row: state the TAF validity window.
+- TAF Period table (separate table): one row per BECMG, TEMPO, PROB group — time window and full conditions. Bold key threats (low vis, CB, strong gusts, low ceiling).
+- Bottom Line: 2–3 hard-hitting sentences covering the arrival window at ETA, whether destination is above Cat I/II/III minima, any deterioration trend and timing, and fuel/holding implications.
 
-### 5. DESTINATION
-- Parse METAR: Wind, Temp/QNH, Visibility, Cloud/NCD.
-- TAF period table: each BECMG, TEMPO, PROB group as a separate row with time window and conditions.
-- Crosswind analysis on expected landing runway if data available — state crosswind component in KT and whether it is within limits.
-- NOTAM check: night curfew vs ETA, ILS/approach aid status, OCA(H) changes.
-- **Operational Impact paragraph (MANDATORY):** State the actual arrival conditions expected at ETA — visibility, ceiling, wind, and precipitation. Explicitly state whether the destination is above minima at ETA. Flag any deterioration trend and at what time conditions are forecast to drop below Cat I/II/III limits. State what fuel action is required if conditions are at or near minima.
-- Bottom Line callout: workable arrival window, deterioration point, operational floor, fuel action if conditions warrant.
+### 5. DESTINATION ALTERNATES
+- One row per alternate airport in the summary table.
+- Usability column: ✅ / ⚠️ / 🔴 followed by one concise justification sentence.
+- Alternate Recommendation: rank alternates by weather viability with a clear verdict.
 
-### 6. DESTINATION ALTERNATES
-Summary table: Airport | METAR | Key TAF Concern | Usable?
-Usability: ✅ above minima with acceptable forecast | ⚠️ marginal | 🔴 not recommended
-For the PRIMARY alternate: full detailed breakdown table (same element-by-element format as Departure) including METAR elements, TAF concern, and crosswind on the expected runway.
-**Operational Impact paragraph (MANDATORY for primary alternate):** Explain whether the alternate is genuinely usable at the expected diversion time, what the forecast conditions are, and any concerns (fog, low visibility, thunderstorms, runway limitations). State whether it meets the fuel planning assumptions.
-End with Alternate Recommendation note stating clearly whether the alternate is adequate or if a better option should be considered.
-
-### 7. EDTO / CRITICAL AIRPORTS
-Only airports designated as EDTO critical in the flight plan.
-For each: METAR + TAF concern most relevant to the EDTO window.
-Mark ✅ (adequate) or ⚠️ (marginal). Omit this section entirely if no EDTO airports are provided.
+### 6. EDTO / CRITICAL AIRPORTS
+- One row per EDTO airport: raw METAR and key TAF concern for the EDTO window. End with ✅ or ⚠️.
+- Omit this section entirely if no EDTO airports are listed in the input.
 
 ---
 
 ## OUTPUT FORMAT — PRODUCE EXACTLY THIS STRUCTURE
 
-\`\`\`
 ## MODULE 2: WEATHER BRIEFING
 
 ---
 
-### 🛫 DEPARTURE — {ICAO}/{IATA} ({City})
-[METAR element table]
-[TAF Summary table]
-**Operational Impact:** [paragraph]
-
----
-
-### 🌩️ SIGMET SUMMARY — Enroute Significant Weather
-> **Note:** Briefing time is {ZULU}. [active/expired note]
-[SIGMET table: FIR | SIGMET | Threat | Top | Status]
-> **🌋 VOLCANIC ASH** — [if applicable]
-
----
-
-### ✈️ ENROUTE WEATHER — Sector Snapshot
-[Sector | Key Hazard table]
-
----
-
-### 🌬️ ENROUTE — Segmented Wind & ISA Analysis
-[Segment | FL | Wind | ISA Dev | Notes table]
-**Average Route W/C: {M/P}{value} KT — [characterisation]**
-
----
-
-### 🛬 DESTINATION — {ICAO}/{IATA} ({City})
+### \U0001f6eb DEPARTURE — [ICAO/IATA] ([Airport Name])
 
 | Element | Detail |
 |---|---|
-| **METAR ({time})** | {decoded wind, vis, cloud, temp, QNH} |
-| **Temp / QNH** | {temp}°C / {qnh} hPa |
-| **Wind at ETA (TAF)** | {wind at ETA window from TAF} |
-| **RWY {runway} Crosswind** | {crosswind component in KT — benign / within limits / approaching limit} |
-| **Precipitation at ETA** | {precip type and visibility, or None} |
-| {Each TEMPO/PROB group active at ETA} | {conditions, visibility, ceiling} |
-
-**Operational Impact:** {mandatory paragraph — state actual conditions expected at ETA, whether destination is above Cat I/II/III minima, any deterioration trend and when, NOTAM cross-references, and required fuel action if near minima}
-> **Bottom line {ICAO}:** {arrival window, deterioration point, operational floor, fuel action}
+| **METAR ([Time]Z)** | [Raw METAR] |
+| **Conditions** | [Plain English translation. Brief.] |
+| **TAF Summary** | [ETD window summary. Bold **TEMPO** / **PROB** / **BECMG** groups.] |
+| **Wx Concern** | [Single sentence — most significant departure threat.] |
 
 ---
 
-### 🔄 DESTINATION ALTERNATES
+### \U0001f329️ SIGMET SUMMARY — Enroute Significant Weather
 
-| Airport | METAR Summary | Key TAF Concern | Usable? |
+> **Note:** Briefing time is [DDHHMM]Z. [State how many SIGMETs are active vs expired.]
+
+| FIR | SIGMET | Threat | Top | Status |
+|---|---|---|---|---|
+| **[FIR ICAO]** [FIR Name] | [ID] | [Threat] | [FL] | [⚠️ Expired / \U0001f534 Valid] |
+
+> **\U0001f30b VOLCANIC ASH — [Volcano] ([FIR]):** [Impact and location. Only include if VA SIGMET present.]
+
+---
+
+### ✈️ ENROUTE WEATHER SNAPSHOT
+
+| Sector | Key Hazard |
+|---|---|
+| **[Region (FROM → TO)]** | [Active threats, CB tops, visibility, SIGMET refs.] |
+
+---
+
+### \U0001f6ec DESTINATION — [ICAO/IATA] ([Airport Name])
+
+| Element | Detail |
+|---|---|
+| **METAR ([Time]Z)** | [Raw METAR] — [Brief plain English summary] |
+| **TAF Valid** | [Valid period] |
+
+| Period | Conditions |
+|---|---|
+| [Time window] | [Wind, vis, cloud, precip. Bold **TEMPO** / **PROB** / **BECMG**.] |
+
+> **Bottom line [ICAO]:** [2–3 sentences: arrival window at ETA, minima status, deterioration timing, fuel/holding action if warranted.]
+
+---
+
+### \U0001f504 DESTINATION ALTERNATES
+
+| Airport | METAR | Key TAF Concern | Usable? |
 |---|---|---|---|
-| **{ICAO}/{IATA}** | {brief decoded METAR} | {main TAF risk} | ✅/⚠️/🔴 |
+| **[ICAO/IATA]** [Name] | [Raw METAR] | [Bolded key TAF threats] | [✅ / ⚠️ / \U0001f534 — one sentence justification] |
 
-#### {Primary Alt ICAO}/{IATA} — Detailed Breakdown
-
-| Element | Detail |
-|---|---|
-| **METAR ({time})** | {decoded wind, vis, cloud, temp, QNH} |
-| **TAF at diversion window** | {conditions forecast at estimated diversion time} |
-| **Crosswind on expected RWY** | {crosswind analysis} |
-| **Precipitation** | {precip risk at diversion window} |
-
-**Operational Impact:** {mandatory paragraph — state whether the alternate is genuinely usable at estimated diversion time, forecast conditions at that time, any concerns (fog, CB, runway), and whether it meets the fuel planning assumptions}
-> **Alternate Recommendation:** {clear verdict — adequate / marginal with reason / consider alternative}
+> **Alternate recommendation:** [Rank alternates by weather viability. Clear verdict on best option.]
 
 ---
 
-### 📡 EDTO / CRITICAL AIRPORTS
-[Airport | METAR | TAF Concern | EDTO Window | Status table]
-\`\`\`
+### \U0001f4e1 EDTO / CRITICAL AIRPORTS
+
+| Airport | METAR | TAF Concern |
+|---|---|---|
+| **[ICAO/IATA]** [Name] | [Raw METAR] | [Key threat for EDTO window. End with ✅ or ⚠️.] |
 
 ---
 
 ## FORMATTING RULES
-- Times: UTC Zulu — format DDHHMM Z (e.g. 030250Z).
-- Visibility: include units — 9,999m, 4,000m, 800m.
-- Wind: direction/speedKT steady; direction/speedGgustKT gusting.
-- Flight levels: FL{level} (e.g. FL380).
-- SIGMET threats: standard ICAO abbrev — EMBD TS, ISOL TS, VA, TURB, ICING, INTSF, WKN, STNR, MOV N, etc.
-- ISA deviation: P{value} warm, M{value} cold, P00 on-standard.
-- Expired SIGMETs ⚠️, Active SIGMETs 🔴, Usability ✅/⚠️/🔴.
-- Bold only threshold/warning values inside table cells — not random words.
+- Times: UTC Zulu — DDHHMM Z format (e.g. 030250Z).
+- Visibility: always include units — 9999m, 4000m, 800m.
+- Wind: direction/speedKT or direction/speedGgustKT.
+- SIGMETs: standard ICAO abbreviations — EMBD TS, ISOL TS, VA, TURB, ICING, etc.
+- Expired SIGMETs ⚠️, Active SIGMETs \U0001f534, Usability ✅/⚠️/\U0001f534.
+- Bold only threshold/warning values in cells — not random words.
+- Do NOT include image placeholders, satellite references, or any non-text content.
 
 ## EDGE CASES
-- SIGMET straddles briefing time → ⚠️ Partially valid at brief time.
-- No TAF for alternate → state "TAF NOT AVAILABLE — use METAR trend only." Mark ⚠️.
+- No TAF for alternate → "TAF NOT AVAILABLE — use METAR trend only." Mark ⚠️.
 - Volcanic ash SIGMET → always include standalone callout even if expired.
-- EDTO airports not specified → omit section entirely, no placeholder.
-- Wind data missing for segment → [WIND DATA NOT PROVIDED], do not guess.
-- Step climb → each step as a separate row in wind table.
-- Destination below minima at ETA → Bottom line must state: "Destination below dispatch minima at ETA — coordinate with dispatch."
+- EDTO airports not in input → omit EDTO section entirely, no placeholder.
+- Destination below Cat I minima at ETA → Bottom line must state: "Destination below dispatch minima at ETA — coordinate with dispatch."
+- SIGMET straddles briefing time → ⚠️ Partially valid at brief time.
 
 ## MANDATORY COMPLETION CHECKLIST — VERIFY BEFORE OUTPUTTING
 
-Before submitting your response, confirm every item below is present. If any is missing, add it now.
+Confirm every section below is present. If missing, add it before submitting.
 
-- [ ] 🛫 **DEPARTURE** — METAR table + TAF summary + **Operational Impact paragraph**
-- [ ] 🌩️ **SIGMET SUMMARY** — table with all SIGMETs including expired ones
-- [ ] ✈️ **ENROUTE WEATHER** — sector snapshot table
-- [ ] 🌬️ **ENROUTE WIND** — segmented wind & ISA table with Average W/C
-- [ ] 🛬 **DESTINATION** — METAR table + TAF group table + **Operational Impact paragraph** + Bottom Line callout
-- [ ] 🔄 **DESTINATION ALTERNATES** — summary table + primary alternate detailed breakdown + **Operational Impact paragraph** + Alternate Recommendation
-- [ ] 📡 **EDTO** — include ONLY if EDTO airports were listed in the input; omit entirely if not
+- [ ] \U0001f6eb **DEPARTURE** — Element table (METAR, Conditions, TAF Summary, Wx Concern)
+- [ ] \U0001f329️ **SIGMET SUMMARY** — Full table + TS/TSRA callout if applicable
+- [ ] ✈️ **ENROUTE WEATHER SNAPSHOT** — Sector | Key Hazard table
+- [ ] \U0001f6ec **DESTINATION** — METAR row + TAF period table + Bottom Line callout
+- [ ] \U0001f504 **DESTINATION ALTERNATES** — Summary table + Alternate Recommendation
+- [ ] \U0001f4e1 **EDTO** — Include ONLY if EDTO airports listed in input
 
-**The DESTINATION and ALTERNATES sections are safety-critical. They must always be present with full detail. Never omit or abbreviate them.**`;
+**DESTINATION and ALTERNATES are safety-critical. Never omit or abbreviate them.**`;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MODULE 3 — NOTAMs  (dedicated Claude call — full spec)
