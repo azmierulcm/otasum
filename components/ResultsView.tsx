@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Module, MODULE_META } from '@/lib/types';
 import MarkdownRenderer from './MarkdownRenderer';
 
@@ -10,10 +10,156 @@ interface ResultsViewProps {
   onReset: () => void;
 }
 
-const SKELETON_QUIPS: Record<string, string> = {
-  weather: 'Arguing with the met office about that forecast…',
-  notams:  'Reading all the NOTAMs so you don\'t have to…',
+// ── Per-module loading quips ──────────────────────────────────────────────────
+
+const SKELETON_QUIPS: Record<string, string[]> = {
+  weather: [
+    'Decoding METARs and arguing with TAFs…',
+    'Checking if that TSRA is actually on your route…',
+    'Counting TEMPO groups affecting your arrival…',
+    'Consulting SIGMETs from 6 different FIRs…',
+    'Negotiating with the jetstream for a better W/C…',
+    'Verifying ceilings haven\'t dropped since brief time…',
+    'Cross-checking the alternate forecast with appropriate scepticism…',
+  ],
+  notams: [
+    'Sifting through the GPS RAIM NOTAMs first…',
+    'Identifying closures that actually affect your flight…',
+    'Filtering out the ones that expired in 2019…',
+    'Checking if that ILS is really U/S or just "degraded"…',
+    'Translating NOTAM-speak into plain English…',
+    'Scanning for anything that would ruin your day…',
+    'Verifying the stop bar situation at your arrival stand…',
+  ],
 };
+
+// ── Skeleton sub-components ───────────────────────────────────────────────────
+
+function WxSkeleton() {
+  return (
+    <div className="space-y-5 animate-pulse">
+      {/* Departure section */}
+      <div className="space-y-2">
+        <div className="h-3 bg-[#1B2B5E]/20 rounded-md w-44" />
+        <div className="h-2.5 bg-gray-100 rounded w-full" />
+        <div className="h-2.5 bg-gray-100 rounded w-5/6" />
+        <div className="h-2.5 bg-gray-100 rounded w-4/5" />
+      </div>
+      {/* Table placeholder */}
+      <div className="rounded-xl border border-gray-100 overflow-hidden">
+        <div className="h-8 bg-[#1B2B5E]/15" />
+        {[0, 1, 2, 3].map(i => (
+          <div key={i} className="h-7 border-t border-gray-100 bg-gray-50/60 flex items-center px-3 gap-4">
+            <div className="h-2 bg-gray-200 rounded w-16" />
+            <div className="h-2 bg-gray-200 rounded w-24" />
+            <div className="h-2 bg-gray-200 rounded w-20" />
+          </div>
+        ))}
+      </div>
+      {/* Enroute section */}
+      <div className="space-y-2">
+        <div className="h-3 bg-[#1B2B5E]/20 rounded-md w-52" />
+        <div className="rounded-xl border border-gray-100 overflow-hidden">
+          <div className="h-8 bg-[#1B2B5E]/15" />
+          {[0, 1, 2].map(i => (
+            <div key={i} className="h-7 border-t border-gray-100 bg-gray-50/60 flex items-center px-3 gap-4">
+              <div className="h-2 bg-gray-200 rounded w-20" />
+              <div className="h-2 bg-gray-200 rounded w-16" />
+              <div className="h-2 bg-gray-200 rounded w-28" />
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* Destination section */}
+      <div className="space-y-2">
+        <div className="h-3 bg-[#1B2B5E]/20 rounded-md w-48" />
+        <div className="h-2.5 bg-gray-100 rounded w-full" />
+        <div className="h-2.5 bg-gray-100 rounded w-3/4" />
+        <div className="h-2.5 bg-gray-100 rounded w-4/5" />
+      </div>
+    </div>
+  );
+}
+
+function NotamSkeleton() {
+  const cards = [
+    { color: '#DC2626', w: '60%' },
+    { color: '#D97706', w: '75%' },
+    { color: '#16A34A', w: '55%' },
+  ];
+  return (
+    <div className="space-y-5 animate-pulse">
+      {/* Departure section */}
+      <div className="h-3 bg-[#1B2B5E]/20 rounded-md w-40" />
+      <div className="space-y-4">
+        {cards.map((c, i) => (
+          <div key={i} className="pl-3 border-l-2 space-y-1.5" style={{ borderColor: c.color }}>
+            <div className="h-3 bg-gray-200 rounded" style={{ width: c.w }} />
+            <div className="h-2.5 bg-gray-100 rounded w-full" />
+            <div className="h-2.5 bg-gray-100 rounded w-4/5" />
+          </div>
+        ))}
+      </div>
+      {/* Destination section */}
+      <div className="h-3 bg-[#1B2B5E]/20 rounded-md w-44 mt-2" />
+      <div className="space-y-4">
+        {[{ color: '#DC2626', w: '65%' }, { color: '#D97706', w: '70%' }].map((c, i) => (
+          <div key={i} className="pl-3 border-l-2 space-y-1.5" style={{ borderColor: c.color }}>
+            <div className="h-3 bg-gray-200 rounded" style={{ width: c.w }} />
+            <div className="h-2.5 bg-gray-100 rounded w-full" />
+            <div className="h-2.5 bg-gray-100 rounded w-3/4" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ModuleLoadingSkeleton({ moduleKey }: { moduleKey: string }) {
+  const quips   = SKELETON_QUIPS[moduleKey] ?? ['Awaiting AI analysis…'];
+  const [idx, setIdx]       = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const qTimer = setInterval(() => setIdx(i => (i + 1) % quips.length), 2200);
+    const eTimer = setInterval(() => setElapsed(s => s + 1), 1000);
+    return () => { clearInterval(qTimer); clearInterval(eTimer); };
+  }, [quips.length]);
+
+  return (
+    <div className="space-y-5">
+      {/* AI thinking header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5 bg-[#1B2B5E]/8 rounded-full px-3 py-1.5">
+          <span className="flex items-center gap-1">
+            {[0, 1, 2].map(i => (
+              <span
+                key={i}
+                className="block w-1.5 h-1.5 rounded-full bg-[#1B2B5E] animate-pulse"
+                style={{ animationDelay: `${i * 180}ms` }}
+              />
+            ))}
+          </span>
+          <span className="text-xs font-semibold text-[#1B2B5E]">AI analysing</span>
+        </div>
+        <span className="text-xs text-gray-400 tabular-nums font-mono">{elapsed}s</span>
+      </div>
+
+      {/* Module-specific skeleton */}
+      {moduleKey === 'weather' ? <WxSkeleton /> : <NotamSkeleton />}
+
+      {/* Rotating quip */}
+      <p
+        key={idx}
+        className="text-center text-xs text-gray-400 italic animate-fade-in pt-1"
+      >
+        {quips[idx]}
+      </p>
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 
 export default function ResultsView({ modules, fileName, onReset }: ResultsViewProps) {
   const [activeIndex, setActiveIndex] = useState(0);
@@ -48,7 +194,7 @@ export default function ResultsView({ modules, fileName, onReset }: ResultsViewP
         </div>
       </div>
 
-      {/* Progress bar — fills as modules stream in, pops away when done */}
+      {/* Progress bar */}
       <div
         className={`h-1 bg-gray-100 origin-top ${allDone ? 'animate-progress-pop' : ''}`}
         aria-hidden
@@ -110,7 +256,7 @@ export default function ResultsView({ modules, fileName, onReset }: ResultsViewP
             {activeModule ? (
               <MarkdownRenderer content={activeModule.content} />
             ) : (
-              <ModuleLoadingSkeleton quip={SKELETON_QUIPS[activeMeta.key]} />
+              <ModuleLoadingSkeleton moduleKey={activeMeta.key} />
             )}
           </div>
 
@@ -149,26 +295,6 @@ export default function ResultsView({ modules, fileName, onReset }: ResultsViewP
           })}
         </div>
       </div>
-    </div>
-  );
-}
-
-function ModuleLoadingSkeleton({ quip }: { quip?: string }) {
-  return (
-    <div className="space-y-3 animate-pulse">
-      <div className="h-3.5 bg-gray-100 rounded-lg w-3/4" />
-      <div className="h-3.5 bg-gray-100 rounded-lg w-full" />
-      <div className="h-3.5 bg-gray-100 rounded-lg w-5/6" />
-      <div className="h-3.5 bg-gray-100 rounded-lg w-2/3 mt-6" />
-      <div className="h-3.5 bg-gray-100 rounded-lg w-full" />
-      <div className="h-3.5 bg-gray-100 rounded-lg w-4/5" />
-      <div className="h-3.5 bg-gray-100 rounded-lg w-full" />
-      <div className="h-3.5 bg-gray-100 rounded-lg w-3/4 mt-6" />
-      <div className="h-3.5 bg-gray-100 rounded-lg w-full" />
-      <div className="h-3.5 bg-gray-100 rounded-lg w-5/6" />
-      <p className="text-center text-xs text-gray-400 italic pt-6">
-        {quip ?? 'Awaiting AI analysis…'}
-      </p>
     </div>
   );
 }
