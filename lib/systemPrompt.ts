@@ -97,18 +97,38 @@ Mark ✅ (adequate) or ⚠️ (marginal). Omit this section entirely if no EDTO 
 ---
 
 ### 🛬 DESTINATION — {ICAO}/{IATA} ({City})
-[METAR element table]
-[TAF period table]
-**Operational Impact:** [paragraph with NOTAM refs]
-> **Bottom line {ICAO}:** [window, deterioration point, floor, fuel action]
+
+| Element | Detail |
+|---|---|
+| **METAR ({time})** | {decoded wind, vis, cloud, temp, QNH} |
+| **Temp / QNH** | {temp}°C / {qnh} hPa |
+| **Wind at ETA (TAF)** | {wind at ETA window from TAF} |
+| **RWY {runway} Crosswind** | {crosswind component in KT — benign / within limits / approaching limit} |
+| **Precipitation at ETA** | {precip type and visibility, or None} |
+| {Each TEMPO/PROB group active at ETA} | {conditions, visibility, ceiling} |
+
+**Operational Impact:** {mandatory paragraph — state actual conditions expected at ETA, whether destination is above Cat I/II/III minima, any deterioration trend and when, NOTAM cross-references, and required fuel action if near minima}
+> **Bottom line {ICAO}:** {arrival window, deterioration point, operational floor, fuel action}
 
 ---
 
 ### 🔄 DESTINATION ALTERNATES
-[Airport | METAR | Key TAF Concern | Usable? table]
+
+| Airport | METAR Summary | Key TAF Concern | Usable? |
+|---|---|---|---|
+| **{ICAO}/{IATA}** | {brief decoded METAR} | {main TAF risk} | ✅/⚠️/🔴 |
+
 #### {Primary Alt ICAO}/{IATA} — Detailed Breakdown
-[Detailed element table]
-> **Alternate Recommendation:** [recommendation with reason]
+
+| Element | Detail |
+|---|---|
+| **METAR ({time})** | {decoded wind, vis, cloud, temp, QNH} |
+| **TAF at diversion window** | {conditions forecast at estimated diversion time} |
+| **Crosswind on expected RWY** | {crosswind analysis} |
+| **Precipitation** | {precip risk at diversion window} |
+
+**Operational Impact:** {mandatory paragraph — state whether the alternate is genuinely usable at estimated diversion time, forecast conditions at that time, any concerns (fog, CB, runway), and whether it meets the fuel planning assumptions}
+> **Alternate Recommendation:** {clear verdict — adequate / marginal with reason / consider alternative}
 
 ---
 
@@ -135,7 +155,21 @@ Mark ✅ (adequate) or ⚠️ (marginal). Omit this section entirely if no EDTO 
 - EDTO airports not specified → omit section entirely, no placeholder.
 - Wind data missing for segment → [WIND DATA NOT PROVIDED], do not guess.
 - Step climb → each step as a separate row in wind table.
-- Destination below minima at ETA → Bottom line must state: "Destination below dispatch minima at ETA — coordinate with dispatch."`;
+- Destination below minima at ETA → Bottom line must state: "Destination below dispatch minima at ETA — coordinate with dispatch."
+
+## MANDATORY COMPLETION CHECKLIST — VERIFY BEFORE OUTPUTTING
+
+Before submitting your response, confirm every item below is present. If any is missing, add it now.
+
+- [ ] 🛫 **DEPARTURE** — METAR table + TAF summary + **Operational Impact paragraph**
+- [ ] 🌩️ **SIGMET SUMMARY** — table with all SIGMETs including expired ones
+- [ ] ✈️ **ENROUTE WEATHER** — sector snapshot table
+- [ ] 🌬️ **ENROUTE WIND** — segmented wind & ISA table with Average W/C
+- [ ] 🛬 **DESTINATION** — METAR table + TAF group table + **Operational Impact paragraph** + Bottom Line callout
+- [ ] 🔄 **DESTINATION ALTERNATES** — summary table + primary alternate detailed breakdown + **Operational Impact paragraph** + Alternate Recommendation
+- [ ] 📡 **EDTO** — include ONLY if EDTO airports were listed in the input; omit entirely if not
+
+**The DESTINATION and ALTERNATES sections are safety-critical. They must always be present with full detail. Never omit or abbreviate them.**`;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MODULE 3 — NOTAMs  (dedicated Claude call — full spec)
