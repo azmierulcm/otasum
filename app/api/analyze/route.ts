@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import {
   WX_SYSTEM_PROMPT,
   NOTAM_SYSTEM_PROMPT,
@@ -17,7 +17,20 @@ import {
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
-const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const genai = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY ?? '');
+
+// Each model instance carries its own system instruction
+const wxModel = genai.getGenerativeModel({
+  model: 'gemini-2.0-flash',
+  systemInstruction: WX_SYSTEM_PROMPT,
+  generationConfig: { maxOutputTokens: 4096 },
+});
+
+const notamModel = genai.getGenerativeModel({
+  model: 'gemini-2.0-flash',
+  systemInstruction: NOTAM_SYSTEM_PROMPT,
+  generationConfig: { maxOutputTokens: 3000 },
+});
 
 const MODULE_META = [
   { number: 1, key: 'ofp',       label: 'OFP Core Summary',  shortLabel: 'OFP'   },
@@ -27,11 +40,6 @@ const MODULE_META = [
   { number: 5, key: 'edto',      label: 'EDTO Breakdown',     shortLabel: 'EDTO'  },
   { number: 6, key: 'fuel',      label: 'Fuel vs MDF',        shortLabel: 'FUEL'  },
 ];
-
-function claudeText(msg: Anthropic.Message): string {
-  const block = msg.content[0];
-  return block.type === 'text' ? block.text : '';
-}
 
 function stripModuleHeader(text: string): string {
   return text.replace(/^##\s*MODULE\s*\d+:[^\n]*\n*/i, '').trimStart();
@@ -77,31 +85,31 @@ export async function POST(request: NextRequest) {
         send({ type: 'module', data: buildModule(MODULE_META[4], local.edto) });
         send({ type: 'module', data: buildModule(MODULE_META[5], local.fuel) });
 
-        // ── 3. Claude calls — both start now, each streams when it finishes ──
+        // ── 3. Gemini calls — both start now, each streams when it finishes ──
         const wxSection    = extractWxSection(rawText);
         const notamSection = extractNotamSection(rawText);
 
-        const wxPromise = ai.messages.create({
-          model:      'claude-sonnet-4-6',
-          max_tokens: 4096,
-          system:     WX_SYSTEM_PROMPT,
-          messages:   [{ role: 'user', content: buildWxMessage(ctx, wxSection) }],
-        }).then(msg => {
-          send({ type: 'module', data: buildModule(MODULE_META[1], stripModuleHeader(claudeText(msg))) });
-        }).catch(() => {
-          send({ type: 'module', data: buildModule(MODULE_META[1], '*Weather briefing unavailable — analysis failed.*') });
-        });
+        const wxPromise = wxModel
+          .generateContent(buildWxMessage(ctx, wxSection))
+          .then(result => {
+            const wxText = stripModuleHeader(result.response.text());
+            send({ type: 'module', data: buildModule(MODULE_META[1], wxText) });
+          })
+          .catch(err => {
+            console.error('[WX Gemini]', err);
+            send({ type: 'module', data: buildModule(MODULE_META[1], '*Weather briefing unavailable — analysis failed.*') });
+          });
 
-        const notamPromise = ai.messages.create({
-          model:      'claude-haiku-4-5-20251001',
-          max_tokens: 3000,
-          system:     NOTAM_SYSTEM_PROMPT,
-          messages:   [{ role: 'user', content: buildNotamMessage(ctx, notamSection) }],
-        }).then(msg => {
-          send({ type: 'module', data: buildModule(MODULE_META[2], stripModuleHeader(claudeText(msg))) });
-        }).catch(() => {
-          send({ type: 'module', data: buildModule(MODULE_META[2], '*NOTAM briefing unavailable — analysis failed.*') });
-        });
+        const notamPromise = notamModel
+          .generateContent(buildNotamMessage(ctx, notamSection))
+          .then(result => {
+            const notamText = stripModuleHeader(result.response.text());
+            send({ type: 'module', data: buildModule(MODULE_META[2], notamText) });
+          })
+          .catch(err => {
+            console.error('[NOTAM Gemini]', err);
+            send({ type: 'module', data: buildModule(MODULE_META[2], '*NOTAM briefing unavailable — analysis failed.*') });
+          });
 
         await Promise.all([wxPromise, notamPromise]);
         send({ type: 'done' });
@@ -109,8 +117,7 @@ export async function POST(request: NextRequest) {
 
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Analysis failed.';
-        const send2 = (obj: object) => controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'));
-        send2({ type: 'error', message });
+        controller.enqueue(encoder.encode(JSON.stringify({ type: 'error', message }) + '\n'));
         controller.close();
       }
     },
