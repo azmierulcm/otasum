@@ -254,8 +254,6 @@ Generate EXACTLY this markdown structure. Use a 3-column table per section:
 \`\`\`
 ## MODULE 3: OPERATIONALLY SIGNIFICANT NOTAMs
 
-> Company NOTAMs (CO##/##) retained only where operationally significant.
-
 ---
 
 ### Departure — {ICAO}/{IATA}

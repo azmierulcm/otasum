@@ -20,7 +20,7 @@ const components: Components = {
     <h4 className="text-xs font-bold text-gray-600 mb-1.5 mt-3 uppercase tracking-widest">{children}</h4>
   ),
   p: ({ children }) => (
-    <p className="text-sm text-[#484848] mb-3 leading-relaxed">{children}</p>
+    <p className="text-base text-[#484848] mb-3 leading-relaxed">{children}</p>
   ),
   strong: ({ children }) => (
     <strong className="font-bold text-[#1B2B5E]">{children}</strong>
@@ -35,7 +35,7 @@ const components: Components = {
     <ol className="mb-3 space-y-1.5 list-decimal list-outside ml-4">{children}</ol>
   ),
   li: ({ children }) => (
-    <li className="text-sm text-[#484848] flex gap-2.5 items-start leading-relaxed">
+    <li className="text-base text-[#484848] flex gap-2.5 items-start leading-relaxed">
       <span className="mt-[7px] w-1.5 h-1.5 rounded-full bg-[#FF5A5F] flex-shrink-0" />
       <span className="flex-1">{children}</span>
     </li>
@@ -81,12 +81,12 @@ const components: Components = {
     <tr className="even:bg-gray-50/70 hover:bg-sky-50/60 transition-colors">{children}</tr>
   ),
   th: ({ children }) => (
-    <th className="px-3 py-2.5 text-left font-semibold text-xs uppercase tracking-wider whitespace-nowrap">
+    <th className="px-3 py-2.5 text-left font-semibold text-sm uppercase tracking-wider whitespace-nowrap">
       {children}
     </th>
   ),
   td: ({ children }) => (
-    <td className="px-3 py-2 text-[#484848] font-mono align-top">{children}</td>
+    <td className="px-3 py-2.5 text-sm text-[#484848] font-mono align-top">{children}</td>
   ),
   hr: () => <hr className="my-5 border-gray-200" />,
 };

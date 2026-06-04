@@ -228,20 +228,41 @@ export default function ResultsView({ modules, fileName, onReset }: ResultsViewP
         </div>
       </div>
 
-      {/* Progress bar */}
-      <div
-        className={`h-1 bg-gray-100 origin-top ${allDone ? 'animate-progress-pop' : ''}`}
-        aria-hidden
-      >
-        <div
-          className="h-full bg-[#00A699] transition-[width] duration-700 ease-out"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+      {/* Airplane progress bar */}
+      {!allDone && (
+        <div className="relative bg-gray-50 border-b border-gray-100 overflow-hidden" style={{ height: '30px' }} aria-hidden>
+          {/* Fill track */}
+          <div
+            className="absolute inset-y-0 left-0 bg-[#00A699]/12 transition-[width] duration-700 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+          {/* Runway dashes */}
+          <div className="absolute inset-0 flex items-center px-6 gap-0 pointer-events-none">
+            {Array.from({ length: 20 }).map((_, i) => (
+              <div key={i} className="flex-1 border-t border-dashed border-gray-200" />
+            ))}
+          </div>
+          {/* ✈ airplane moves with progress */}
+          <div
+            className="absolute top-1/2 -translate-y-1/2 text-[#00A699] transition-[left] duration-700 ease-out select-none"
+            style={{ left: `calc(${Math.max(pct, 3)}% - 12px)`, fontSize: '16px' }}
+          >
+            ✈
+          </div>
+          {/* Module count left */}
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-gray-400 tabular-nums">
+            {received}/{total} modules
+          </span>
+          {/* Percentage right */}
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-[#00A699] tabular-nums">
+            {pct}%
+          </span>
+        </div>
+      )}
 
       {/* Module tab bar */}
       <div className="bg-white border-b border-gray-100 overflow-x-auto tabs-scroll sticky top-14 z-10">
-        <div className="flex min-w-max px-2">
+        <div className="flex min-w-max sm:min-w-full sm:justify-center px-2">
           {MODULE_META.map((meta, index) => {
             const isActive = index === activeIndex;
             const isReady  = modules.some(m => m.key === meta.key);
@@ -274,21 +295,24 @@ export default function ResultsView({ modules, fileName, onReset }: ResultsViewP
           key={activeMeta.key}
           className="max-w-3xl mx-auto px-3 sm:px-4 py-5 pb-24 animate-fade-in"
         >
-          {/* Module badge */}
-          <div
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-white text-xs font-bold mb-4 shadow-sm"
-            style={{ backgroundColor: activeMeta.color }}
-          >
-            <span>{activeMeta.emoji}</span>
-            <span>MODULE {activeMeta.number}</span>
-            <span className="opacity-60">·</span>
-            <span className="uppercase tracking-wide">{activeMeta.label}</span>
+          {/* Module badge — centred */}
+          <div className="flex justify-center mb-4">
+            <div
+              className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-white text-xs font-bold shadow-sm"
+              style={{ backgroundColor: activeMeta.color }}
+            >
+              <span>{activeMeta.emoji}</span>
+              <span>MODULE {activeMeta.number}</span>
+              <span className="opacity-60">·</span>
+              <span className="uppercase tracking-wide">{activeMeta.label}</span>
+            </div>
           </div>
 
           {/* Content card */}
           <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-5 sm:p-6">
             {activeModule ? (
-              <MarkdownRenderer content={activeModule.content} />
+              // Strip the duplicate ## MODULE N: header the AI outputs — the badge above handles the title
+              <MarkdownRenderer content={activeModule.content.replace(/^##\s*MODULE\s*\d+:[^\n]*\n+/i, '')} />
             ) : (
               <ModuleLoadingSkeleton moduleKey={activeMeta.key} />
             )}
@@ -304,7 +328,7 @@ export default function ResultsView({ modules, fileName, onReset }: ResultsViewP
 
       {/* Bottom nav — mobile */}
       <div className="safe-bottom fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-2 py-1 sm:hidden z-20">
-        <div className="flex justify-around">
+        <div className="flex justify-evenly">
           {MODULE_META.map((meta, index) => {
             const isActive = index === activeIndex;
             const isReady  = modules.some(m => m.key === meta.key);
